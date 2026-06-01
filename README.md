@@ -5,19 +5,17 @@ This repository contains a Flutter app wrapper for the existing `My Territory` w
 ## What is included
 
 - `flutter_app/`: Flutter project skeleton
-- `flutter_app/lib/main.dart`: Main app entry point using `webview_flutter`
+- `flutter_app/lib/main.dart`: Main app entry point using a native Flutter UI
 - `flutter_app/pubspec.yaml`: Flutter dependencies and asset configuration
-- `flutter_app/assets/`: Website assets copied from the original prototype
-  - `index.html`
-  - `style.css`
-  - `app.js`
+- `flutter_app/lib/`: Native app screens, auth repository, and sample app data
 - `.gitignore`: Ignore rules for Flutter and project files
 
 ## Features
 
-- Loads the existing website prototype inside a Flutter `WebView`
-- Uses the local site assets so the app can run offline once installed
-- Includes a base Material app shell with loading indicator
+- Native mobile UI built with Flutter widgets instead of a WebView
+- Local auth flow with phone/OTP and password login stubbed for prototype use
+- Dashboard, profile, and map screens built for mobile navigation
+- Placeholder architecture ready for backend REST API integration
 
 ## How to run
 
@@ -32,11 +30,11 @@ flutter run
 
 ## Notes
 
-- This is a base conversion. The website HTML/CSS/JS is embedded as Flutter assets.
-- Android and iOS launcher icon asset sets have been added under `flutter_app/android/app/src/main/res` and `flutter_app/ios/Runner/Assets.xcassets/AppIcon.appiconset`.
-- Minimal Android and iOS platform config files have also been added for mobile publishing.
-- For a native Flutter implementation, the UI can be rebuilt using Flutter widgets in `lib/main.dart`.
-- OTP/password authentication remains in the web prototype and will continue to work inside the WebView.
+- This is a native Flutter app shell built with widgets and local state management.
+- Phone/OTP and password auth are implemented locally for prototype flow and can be wired to a backend REST API.
+- Android and iOS launcher icon asset sets are added under `flutter_app/android/app/src/main/res` and `flutter_app/ios/Runner/Assets.xcassets/AppIcon.appiconset`.
+- Minimal Android and iOS platform config files have been added for mobile publishing.
+- The current architecture is ready for a backend REST API layer and future native feature expansion.
 
 ## GitHub repo link
 
