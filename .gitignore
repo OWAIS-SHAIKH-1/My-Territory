@@ -1,0 +1,17 @@
+# Flutter generated files
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache
+.pub
+build/
+*.lock
+*.log
+.idea/
+.vscode/
+.DS_Store
+android/.gradle/
+android/app/debug.keystore
+**/gradle-wrapper.jar
+# local environment
+.env
