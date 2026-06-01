@@ -33,6 +33,7 @@ class AuthRepository {
     required String phone,
     required String password,
     String avatar = '🏃‍♂️',
+    String avatarImage = '',
   }) async {
     final prefs = await SharedPreferences.getInstance();
     if (prefs.containsKey(_userKey)) {
@@ -44,6 +45,7 @@ class AuthRepository {
       email: email,
       phone: phone,
       avatar: avatar,
+      avatarImage: avatarImage,
       level: 1,
       xp: 0,
       streak: 0,

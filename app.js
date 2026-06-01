@@ -1,2327 +1,1796 @@
-// Auto-hide bottom nav while scrolling or interacting (mobile)
-function initAutoHideBottomNav() {
-  const nav = document.querySelector('.app-nav-bar');
-  if (!nav) return;
+/* =============================================
+   MY TERRITORY — APP v3.0
+   Auth + Real GPS + Google Maps + Territory Polygons
+   ============================================= */
+'use strict';
 
-  let lastShownAt = 0;
-  let hideTimer = null;
-  let idleTimer = null;
+/* ═══════════════════════════════════════════════
+   STORAGE KEYS
+═══════════════════════════════════════════════ */
+const STORE = {
+  USERS:    'mt_users',
+  SESSION:  'mt_session',
+  GAME:     'mt_game_',
+  GM_KEY:   'mt_gm_key',
+};
 
-  const MIN_VISIBLE_MS = 4000; // show for at least 4s when touched
-  const HIDE_AFTER_RELEASE_MS = 2000; // hide 2s after touchend
-  const SCROLL_DELTA = 6;
-  const IDLE_SHOW_MS = 900;
+/* ═══════════════════════════════════════════════
+   UTILITY HELPERS
+═══════════════════════════════════════════════ */
+function el(id) { return document.getElementById(id); }
+function cls(el, ...c) { el.classList.add(...c); }
+function uncls(el, ...c) { el.classList.remove(...c); }
 
-  function showNav() {
-    nav.classList.remove('nav-hidden');
-    lastShownAt = Date.now();
+let _toastTimer = null;
+function showToast(msg, dur = 3000) {
+  const t = el('toast');
+  if (!t) return;
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => t.classList.remove('show'), dur);
+}
+
+/* Simple hash (not cryptographic — prototype only) */
+function simpleHash(str) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) {
+    h = ((h << 5) - h) + str.charCodeAt(i);
+    h |= 0;
   }
+  return h.toString(36);
+}
 
-  function hideNav() {
-    nav.classList.add('nav-hidden');
+/* Distance between two lat/lng points in meters (Haversine) */
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const φ1 = lat1 * Math.PI / 180, φ2 = lat2 * Math.PI / 180;
+  const Δφ = (lat2 - lat1) * Math.PI / 180;
+  const Δλ = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(Δφ/2)**2 + Math.cos(φ1)*Math.cos(φ2)*Math.sin(Δλ/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+/* Compute area of polygon (in m²) using Shoelace formula on lat/lng */
+function polygonArea(points) {
+  if (points.length < 3) return 0;
+  let area = 0;
+  const n = points.length;
+  for (let i = 0; i < n; i++) {
+    const [lat1, lng1] = points[i];
+    const [lat2, lng2] = points[(i+1) % n];
+    area += (lng1 + lng2) * (lat1 - lat2);
   }
+  return Math.abs(area / 2) * 111000 * 111000;
+}
 
-  // Handle scroll in scrollable containers
-  let lastScroll = 0;
-  const scrollables = Array.from(document.querySelectorAll('.scroll-container'));
-  scrollables.forEach(el => {
-    el.addEventListener('scroll', (ev) => {
-      const st = el.scrollTop || 0;
-      const delta = st - lastScroll;
-      if (delta > SCROLL_DELTA) { // scrolling down
-        hideNav();
-      } else if (delta < -SCROLL_DELTA) { // scrolling up
-        showNav();
-      }
-      lastScroll = st;
-      // show nav after idle
-      clearTimeout(idleTimer);
-      idleTimer = setTimeout(() => { showNav(); }, IDLE_SHOW_MS);
-    }, { passive: true });
-  });
-
-  // Also hide when interacting with the map (touchmove / pointermove)
-  const mapEl = document.getElementById('map-container');
-  if (mapEl) {
-    ['touchmove', 'pointermove'].forEach(evt => {
-      mapEl.addEventListener(evt, () => {
-        hideNav();
-        clearTimeout(idleTimer);
-        idleTimer = setTimeout(() => { showNav(); }, IDLE_SHOW_MS);
-      }, { passive: true });
-    });
+/* ═══════════════════════════════════════════════
+   CONVEX HULL (Andrew's Monotone Chain)
+═══════════════════════════════════════════════ */
+function convexHull(points) {
+  if (points.length < 3) return points;
+  const sorted = [...points].sort((a, b) => a[0] !== b[0] ? a[0] - b[0] : a[1] - b[1]);
+  const cross = (O, A, B) => (A[0]-O[0])*(B[1]-O[1]) - (A[1]-O[1])*(B[0]-O[0]);
+  const lower = [];
+  for (const p of sorted) {
+    while (lower.length >= 2 && cross(lower[lower.length-2], lower[lower.length-1], p) <= 0) lower.pop();
+    lower.push(p);
   }
-
-  // Show nav when user touches/presses the screen. Keep visible at least MIN_VISIBLE_MS.
-  function onPointerDown(e) {
-    // ignore interactions that originate inside the nav itself
-    if (e.target.closest && e.target.closest('.app-nav-bar')) return;
-    showNav();
-    clearTimeout(hideTimer);
+  const upper = [];
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    const p = sorted[i];
+    while (upper.length >= 2 && cross(upper[upper.length-2], upper[upper.length-1], p) <= 0) upper.pop();
+    upper.push(p);
   }
+  lower.pop(); upper.pop();
+  return lower.concat(upper);
+}
 
-  // When the user releases (lifts finger), hide after HIDE_AFTER_RELEASE_MS,
-  // but ensure nav has been visible for at least MIN_VISIBLE_MS.
-  function onPointerUp(e) {
-    if (e.target.closest && e.target.closest('.app-nav-bar')) return;
-    clearTimeout(hideTimer);
-    hideTimer = setTimeout(() => {
-      const elapsed = Date.now() - lastShownAt;
-      if (elapsed >= MIN_VISIBLE_MS) {
-        hideNav();
-      } else {
-        const remaining = MIN_VISIBLE_MS - elapsed;
-        clearTimeout(hideTimer);
-        hideTimer = setTimeout(() => { hideNav(); }, remaining);
-      }
-    }, HIDE_AFTER_RELEASE_MS);
-  }
-
-  ['touchstart', 'pointerdown', 'mousedown'].forEach(evt => {
-    document.addEventListener(evt, onPointerDown, { passive: true });
-  });
-  ['touchend', 'pointerup', 'pointercancel', 'mouseup'].forEach(evt => {
-    document.addEventListener(evt, onPointerUp, { passive: true });
-  });
-
-  // Ensure nav is visible when switching screens via JS navigation
-  document.addEventListener('click', (e) => {
-    if (e.target.closest('.nav-tab') || e.target.closest('.menu-item') || e.target.closest('.ls-item')) {
-      showNav();
-    }
+/* Expand hull outward from its centroid by `deg` degrees (~10m) */
+function expandHull(hull, deg = 0.00015) {
+  if (hull.length === 0) return hull;
+  const cLat = hull.reduce((s,p) => s+p[0], 0) / hull.length;
+  const cLng = hull.reduce((s,p) => s+p[1], 0) / hull.length;
+  return hull.map(([lat, lng]) => {
+    const dLat = lat - cLat, dLng = lng - cLng;
+    const len = Math.sqrt(dLat*dLat + dLng*dLng) || 1;
+    return [lat + dLat/len*deg, lng + dLng/len*deg];
   });
 }
 
-// Initialize auto-hide after DOM ready
-document.addEventListener('DOMContentLoaded', initAutoHideBottomNav);
-/* ==========================================================================
-   MY TERRITORY - APP LOGIC & ENGINE (EXPANDED)
-   "Walk. Run. Capture. Maintain."
-   ========================================================================== */
+/* ═══════════════════════════════════════════════
+   AUTH MODULE
+═══════════════════════════════════════════════ */
+const Auth = (() => {
+  let _otp = null;
+  let _otpPhone = null;
+  let _otpTimer = null;
+  let _countryCode = '+1';
+  let _regStep = 1;
+  let _pendingUser = {};
 
-// --- Audio Synthesizer (Web Audio API) ---
-class SoundEngine {
-  constructor() {
-    this.ctx = null;
-    this.enabled = true;
+  function getUsers() {
+    try { return JSON.parse(localStorage.getItem(STORE.USERS) || '{}'); }
+    catch { return {}; }
   }
 
-  init() {
-    if (!this.ctx) {
-      this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-    }
+  function saveUsers(users) {
+    localStorage.setItem(STORE.USERS, JSON.stringify(users));
   }
 
-  playTone(freq, type, duration, delay = 0) {
-    if (!this.enabled) return;
-    this.init();
-    
+  function getSession() {
+    try { return JSON.parse(localStorage.getItem(STORE.SESSION) || 'null'); }
+    catch { return null; }
+  }
+
+  function saveSession(phone) {
+    localStorage.setItem(STORE.SESSION, JSON.stringify({ phone, ts: Date.now() }));
+  }
+
+  function currentUser() {
+    const s = getSession();
+    if (!s) return null;
+    const users = getUsers();
+    return users[s.phone] || null;
+  }
+
+  /* ── Show / Hide panels ── */
+  function _showPanel(id) {
+    document.querySelectorAll('.auth-panel').forEach(p => {
+      p.classList.remove('active');
+      p.classList.add('slide-left');
+    });
     setTimeout(() => {
-      try {
-        const osc = this.ctx.createOscillator();
-        const gainNode = this.ctx.createGain();
-        
-        osc.type = type;
-        osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
-        
-        gainNode.gain.setValueAtTime(0.1, this.ctx.currentTime);
-        gainNode.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + duration);
-        
-        osc.connect(gainNode);
-        gainNode.connect(this.ctx.destination);
-        
-        osc.start();
-        osc.stop(this.ctx.currentTime + duration);
-      } catch (e) {
-        console.warn("Audio Context failed to play tone:", e);
+      document.querySelectorAll('.auth-panel').forEach(p => uncls(p, 'slide-left'));
+      const panel = el(id);
+      if (panel) panel.classList.add('active');
+    }, 10);
+  }
+
+  function showRegister() { _regStep = 1; _showRegStep(1); _showPanel('authRegister'); }
+  function showLogin()    { _showPanel('authLogin'); }
+  function back()         { _showPanel('authWelcome'); }
+
+  function _showRegStep(step) {
+    _regStep = step;
+    document.querySelectorAll('.reg-step').forEach(s => s.classList.remove('active'));
+    const s = el(`regStep${step}`);
+    if (s) s.classList.add('active');
+    // Update step dots
+    ['rDot1','rDot2','rDot3'].forEach((id, i) => {
+      const dot = el(id);
+      if (!dot) return;
+      uncls(dot, 'active', 'done');
+      if (i+1 < step) dot.classList.add('done');
+      else if (i+1 === step) dot.classList.add('active');
+    });
+    ['rLine12','rLine23'].forEach((id, i) => {
+      const line = el(id);
+      if (!line) return;
+      uncls(line, 'done');
+      if (step > i+1) line.classList.add('done');
+    });
+  }
+
+  /* ── Country Selection ── */
+  function toggleCountry(event) {
+    if (event) event.stopPropagation();
+    const dd = el('countryDropdown');
+    if (!dd) return;
+    const isHidden = dd.classList.contains('hidden');
+    // Close all dropdowns first
+    document.querySelectorAll('.country-dropdown').forEach(d => d.classList.add('hidden'));
+    if (isHidden) dd.classList.remove('hidden');
+  }
+
+  function selectCountry(btn) {
+    if (!btn) return;
+    _countryCode = btn.dataset.code || '+1';
+    const flag = btn.dataset.flag || '🌐';
+    const countryFlagEl = el('countryFlag');
+    const countryCodeEl = el('countryCode');
+    if (countryFlagEl) countryFlagEl.textContent = flag;
+    if (countryCodeEl) countryCodeEl.textContent = _countryCode;
+    const dd = el('countryDropdown');
+    if (dd) dd.classList.add('hidden');
+    showToast(`Country set to ${flag} ${_countryCode}`);
+  }
+
+  /* ── Send OTP ── */
+  function sendOTP() {
+    const name  = (el('regName')?.value || '').trim();
+    const phone = (el('regPhone')?.value || '').replace(/\D/g,'').trim();
+
+    if (!name) { showError('Please enter your name.'); return; }
+    if (phone.length < 7) { showError('Enter a valid phone number.'); return; }
+
+    const fullPhone = _countryCode + phone;
+    const users = getUsers();
+    if (users[fullPhone]) { showError('This phone is already registered. Please sign in.'); return; }
+
+    _pendingUser = { name, phone: fullPhone };
+    _otpPhone = fullPhone;
+
+    // Generate 6-digit OTP
+    _otp = String(Math.floor(100000 + Math.random() * 900000));
+
+    // Show OTP demo box
+    el('otpDemoCode').textContent = _otp;
+    el('otpSentTo').textContent = `OTP sent to ${fullPhone}`;
+
+    // Update login country flag for later
+    if (el('loginFlag')) el('loginFlag').textContent = el('countryFlag').textContent;
+    if (el('loginCode')) el('loginCode').textContent = _countryCode;
+
+    // Move to step 2
+    _showRegStep(2);
+
+    // Focus first OTP box
+    setTimeout(() => {
+      const first = document.querySelector('.otp-box');
+      if (first) first.focus();
+    }, 100);
+
+    // Start 60s countdown
+    startOTPTimer();
+    showToast(`📱 OTP generated! Check the demo box. (Production: SMS to ${fullPhone})`);
+  }
+
+  function startOTPTimer() {
+    let count = 60;
+    const timerEl = el('otpTimer');
+    const resendEl = el('resendBtn');
+    if (timerEl) timerEl.style.display = 'block';
+    if (resendEl) resendEl.style.display = 'none';
+    clearInterval(_otpTimer);
+    _otpTimer = setInterval(() => {
+      count--;
+      const c = el('timerCount');
+      if (c) c.textContent = count;
+      if (count <= 0) {
+        clearInterval(_otpTimer);
+        if (timerEl) timerEl.style.display = 'none';
+        if (resendEl) resendEl.style.display = 'block';
       }
-    }, delay * 1000);
+    }, 1000);
   }
 
-  playClick() {
-    this.playTone(600, 'sine', 0.08);
+  function resendOTP() {
+    _otp = String(Math.floor(100000 + Math.random() * 900000));
+    el('otpDemoCode').textContent = _otp;
+    startOTPTimer();
+    // Clear OTP boxes
+    document.querySelectorAll('.otp-box').forEach(b => { b.value = ''; uncls(b, 'filled', 'error'); });
+    document.querySelector('.otp-box')?.focus();
+    showToast('📱 New OTP generated!');
   }
 
-  playCapture() {
-    // Triumphant major chord arpeggio
-    this.playTone(261.63, 'triangle', 0.2, 0);   // C4
-    this.playTone(329.63, 'triangle', 0.2, 0.08); // E4
-    this.playTone(392.00, 'triangle', 0.2, 0.16); // G4
-    this.playTone(523.25, 'triangle', 0.4, 0.24); // C5
+  /* ── OTP Input Handling ── */
+  function otpInput(input) {
+    const val = input.value.replace(/\D/g,'');
+    input.value = val.slice(0,1);
+    input.classList.toggle('filled', input.value.length > 0);
+    if (val.length > 0) {
+      const next = document.querySelector(`.otp-box[data-index="${parseInt(input.dataset.index)+1}"]`);
+      if (next) next.focus();
+    }
   }
 
-  playLevelUp() {
-    // Game level-up fanfare
-    this.playTone(349.23, 'sawtooth', 0.15, 0);    // F4
-    this.playTone(440.00, 'sawtooth', 0.15, 0.1);   // A4
-    this.playTone(523.25, 'sawtooth', 0.15, 0.2);   // C5
-    this.playTone(587.33, 'sawtooth', 0.15, 0.3);   // D5
-    this.playTone(659.25, 'sawtooth', 0.4, 0.4);    // E5
-    this.playTone(880.00, 'sawtooth', 0.6, 0.55);   // A5
+  function otpKeydown(event, input) {
+    if (event.key === 'Backspace' && !input.value) {
+      const prev = document.querySelector(`.otp-box[data-index="${parseInt(input.dataset.index)-1}"]`);
+      if (prev) { prev.value = ''; prev.classList.remove('filled'); prev.focus(); }
+    }
   }
 
-  playAlert() {
-    this.playTone(150, 'sawtooth', 0.3); // Low frequency buzz
-    this.playTone(150, 'sawtooth', 0.3, 0.15);
+  function getOTPValue() {
+    return Array.from(document.querySelectorAll('.otp-box')).map(b => b.value).join('');
   }
-}
 
-const sounds = new SoundEngine();
-
-// --- Core State Management ---
-const DEFAULT_STATE = {
-  user: {
-    username: "Smarty",
-    level: 12,
-    xp: 700,
-    xpMax: 1000,
-    streak: 7,
-    healthScore: 82,
-    longestStreak: 18,
-    avatar: "🏃‍♂️",
-    avatarImage: "", // Base64 image upload
-    isLoggedIn: false, // Default logged out for prototype setup
-    totalCapturedArea: 125400
-  },
-  settings: {
-    soundEnabled: true,
-    simulationSpeed: "walk",
-    trackingMode: "sim" // sim (simulator) vs device (actual Geolocation API)
-  },
-  territories: [
-    {
-      id: "zone-park",
-      owner: "zone",
-      name: "Stanford Oval Green",
-      strength: 100,
-      points: [
-        [37.4276, -122.1706],
-        [37.4282, -122.1702],
-        [37.4280, -122.1694],
-        [37.4274, -122.1697]
-      ]
-    },
-    {
-      id: "user-t1",
-      owner: "user",
-      name: "Home Base",
-      strength: 90,
-      area: 24500, // square meters pre-defined for MVP start
-      points: [
-        [37.4265, -122.1712],
-        [37.4269, -122.1712],
-        [37.4269, -122.1705],
-        [37.4265, -122.1705]
-      ]
-    },
-    {
-      id: "ai-alpha-t1",
-      owner: "alpha",
-      name: "Alpha Kingdom",
-      strength: 70,
-      points: [
-        [37.4285, -122.1690],
-        [37.4290, -122.1690],
-        [37.4290, -122.1680],
-        [37.4285, -122.1680]
-      ]
-    },
-    {
-      id: "ai-beta-t1",
-      owner: "beta",
-      name: "Beta Outpost",
-      strength: 35,
-      points: [
-        [37.4258, -122.1698],
-        [37.4262, -122.1698],
-        [37.4262, -122.1690],
-        [37.4258, -122.1690]
-      ]
+  /* ── Verify OTP ── */
+  function verifyOTP() {
+    const entered = getOTPValue();
+    if (entered.length < 6) { showError('Enter the full 6-digit OTP.'); return; }
+    if (entered !== _otp) {
+      document.querySelectorAll('.otp-box').forEach(b => { b.classList.add('error'); setTimeout(() => b.classList.remove('error'), 500); });
+      showError('Incorrect OTP. Please try again.');
+      return;
     }
-  ],
-  challenges: [
-    { id: "c1", title: "Walk 2 km", desc: "Track movement to complete", xpReward: 100, progress: 0.8, max: 2, unit: "km", type: "daily", completed: false, badge: "🏃‍♂️" },
-    { id: "c2", title: "Earn 150 XP", desc: "Gain XP from capturing zones", xpReward: 50, progress: 50, max: 150, unit: "XP", type: "daily", completed: false, badge: "⚡" },
-    { id: "c3", title: "Maintain Territory", desc: "Revisit and boost your Home Base", xpReward: 70, progress: 0, max: 1, unit: "revisit", type: "daily", completed: false, badge: "🛡️" },
-    { id: "c4", title: "Weekend Warrior", desc: "Capture 3 separate regions", xpReward: 300, progress: 1, max: 3, unit: "captures", type: "weekly", completed: false, badge: "👑" },
-    { id: "c5", title: "Decay Defender", desc: "Boost a decaying zone (below 50% strength)", xpReward: 150, progress: 0, max: 1, unit: "defend", type: "weekly", completed: false, badge: "🔥" }
-  ],
-  leaderboard: [
-    { rank: 1, name: "TerritoryKing", avatar: "👑🏃‍♂️", score: 14800, size: "95,000m²", isUser: false },
-    { rank: 2, name: "AlphaRunner", avatar: "🏃‍♀️", score: 12500, size: "84,300m²", isUser: false },
-    { rank: 3, name: "BetaRunner", avatar: "🚴‍♂️", score: 9200, size: "62,100m²", isUser: false },
-    { rank: 4, name: "Smarty", avatar: "🏃‍♂️", score: 7800, size: "24,500m²", isUser: true },
-    { rank: 5, name: "JoggerMax", avatar: "🦁", score: 6200, size: "18,400m²", isUser: false }
-  ],
-  badges: [
-    { id: "b1", name: "First Claim", icon: "🗺️", unlocked: true, desc: "Captured your first territory." },
-    { id: "b2", name: "Week Streak", icon: "🔥", unlocked: true, desc: "Maintained a 7-day walking streak." },
-    { id: "b3", name: "Defender", icon: "🛡️", unlocked: false, desc: "Revisited a territory to boost strength." },
-    { id: "b4", name: "Legendary Walk", icon: "👑", unlocked: false, desc: "Walked a total of 50 km." }
-  ]
-};
-
-let appState = {};
-let activeChallengeFilter = "daily";
-
-function loadState() {
-  const saved = localStorage.getItem("my_territory_state");
-  if (saved) {
-    try {
-      appState = JSON.parse(saved);
-      // Sync leaderboard user stats
-      const userRank = appState.leaderboard.find(l => l.isUser);
-      if (userRank) {
-        userRank.name = appState.user.username;
-        userRank.avatar = appState.user.avatarImage ? "🖼️" : appState.user.avatar;
-        userRank.score = appState.user.level * 1000 + appState.user.xp;
-        userRank.size = appState.user.totalCapturedArea.toLocaleString() + "m²";
-      }
-    } catch (e) {
-      console.error("Failed to parse saved state, resetting:", e);
-      appState = JSON.parse(JSON.stringify(DEFAULT_STATE));
-    }
-  } else {
-    appState = JSON.parse(JSON.stringify(DEFAULT_STATE));
+    clearInterval(_otpTimer);
+    showToast('✅ Phone verified!');
+    _showRegStep(3);
   }
-}
 
-function saveState() {
-  localStorage.setItem("my_territory_state", JSON.stringify(appState));
-}
+  /* ── Password strength ── */
+  function checkPassStrength() {
+    const pass = el('regPass')?.value || '';
+    const fill = el('passStrengthFill');
+    const label = el('passStrengthLabel');
+    if (!fill || !label) return;
+    let score = 0;
+    if (pass.length >= 8) score++;
+    if (/[A-Z]/.test(pass)) score++;
+    if (/[0-9]/.test(pass)) score++;
+    if (/[^A-Za-z0-9]/.test(pass)) score++;
+    const levels = [
+      { w: '0%',   c: 'transparent', t: '' },
+      { w: '25%',  c: '#EF4444', t: 'Weak' },
+      { w: '50%',  c: '#F59E0B', t: 'Fair' },
+      { w: '75%',  c: '#3B82F6', t: 'Good' },
+      { w: '100%', c: '#10B981', t: 'Strong 💪' },
+    ];
+    const lv = levels[score] || levels[0];
+    fill.style.width = lv.w;
+    fill.style.background = lv.c;
+    label.textContent = lv.t;
+    label.style.color = lv.c;
+  }
 
-// --- Authentication UI Logic ---
-let tempUploadedPhotoBase64 = "";
+  function togglePass(inputId, btn) {
+    const input = el(inputId);
+    if (!input) return;
+    const isPass = input.type === 'password';
+    input.type = isPass ? 'text' : 'password';
+    btn.innerHTML = isPass ? '<i class="fa-solid fa-eye-slash"></i>' : '<i class="fa-solid fa-eye"></i>';
+  }
 
-function initAuth() {
-  const authScreen = document.getElementById("auth-screen");
-  const mainApp = document.getElementById("main-app");
+  /* ── Create Account ── */
+  function createAccount() {
+    const pass = el('regPass')?.value || '';
+    const conf = el('regPassConfirm')?.value || '';
+    if (pass.length < 8) { showError('Password must be at least 8 characters.'); return; }
+    if (pass !== conf) { showError('Passwords do not match.'); return; }
 
-  const toLoginBtn = document.getElementById("to-login-btn");
-  const toRegisterBtn = document.getElementById("to-register-btn");
-  
-  const registerForm = document.getElementById("register-form");
-  const loginForm = document.getElementById("login-form");
-  
-  const authTitle = document.getElementById("auth-title");
-  const authSubtitle = document.getElementById("auth-subtitle");
-
-  const authPhotoInput = document.getElementById("auth-photo-file");
-  const authAvatarPreview = document.getElementById("auth-avatar-preview");
-
-  // Load avatar photo uploading trigger inside Auth
-  authPhotoInput.addEventListener("change", (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      compressAndReadPhoto(file, (base64) => {
-        tempUploadedPhotoBase64 = base64;
-        authAvatarPreview.style.backgroundImage = `url(${base64})`;
-        authAvatarPreview.innerText = ""; // Clear emoji placeholder
-        authAvatarPreview.classList.add("has-image");
-        sounds.playClick();
-      });
-    }
-  });
-
-  // Switch to Login screen
-  toLoginBtn.addEventListener("click", () => {
-    sounds.playClick();
-    registerForm.classList.add("hidden");
-    loginForm.classList.remove("hidden");
-    authTitle.innerText = "Welcome Back";
-    authSubtitle.innerText = "Log in to reclaim your kingdom!";
-  });
-
-  // Switch to Register screen
-  toRegisterBtn.addEventListener("click", () => {
-    sounds.playClick();
-    loginForm.classList.add("hidden");
-    registerForm.classList.remove("hidden");
-    authTitle.innerText = "Create Account";
-    authSubtitle.innerText = "Join the territory battles!";
-  });
-
-  // Form Submit: Register
-  registerForm.addEventListener("submit", (e) => {
-    e.preventDefault();
-    sounds.playClick();
-    
-    const username = document.getElementById("reg-username").value.trim();
-    if (!username) return;
-
-    appState.user.username = username;
-    appState.user.isLoggedIn = true;
-    
-    // Save image if uploaded
-    if (tempUploadedPhotoBase64) {
-      appState.user.avatarImage = tempUploadedPhotoBase64;
-    }
-    
-    saveState();
-    
-    // Switch Views
-    authScreen.classList.add("hidden");
-    mainApp.classList.remove("hidden");
-    
-    // Initialize Dashboard UI Values
-    syncStatsUI();
-    renderMissions();
-    renderLeaderboard();
-    if (map) {
-      map.invalidateSize();
-    }
-    
-    showToast("🎉 Welcome!", `Account created! Good luck capturing, ${username}.`);
-    sounds.playLevelUp();
-  });
-
-  // Form Submit: Login
-  loginForm.addEventListener("submit", (e) => {
-    e.preventDefault();
-    sounds.playClick();
-
-    const username = document.getElementById("login-username").value.trim();
-    if (!username) return;
-
-    appState.user.username = username;
-    appState.user.isLoggedIn = true;
-
-    saveState();
-    
-    authScreen.classList.add("hidden");
-    mainApp.classList.remove("hidden");
-
-    syncStatsUI();
-    renderMissions();
-    renderLeaderboard();
-    if (map) {
-      map.invalidateSize();
-    }
-
-    showToast("👋 Welcome Back!", `Logged in as ${username}.`);
-  });
-
-  // Handle Logout Button
-  document.getElementById("btn-logout").addEventListener("click", () => {
-    if (confirm("Are you sure you want to logout?")) {
-      sounds.playClick();
-      appState.user.isLoggedIn = false;
-      saveState();
-
-      // Show auth screens
-      mainApp.classList.add("hidden");
-      authScreen.classList.remove("hidden");
-      
-      // Reset inputs
-      document.getElementById("reg-username").value = "";
-      document.getElementById("login-username").value = "";
-      authAvatarPreview.style.backgroundImage = "none";
-      authAvatarPreview.innerText = "🏃‍♂️";
-      authAvatarPreview.classList.remove("has-image");
-      tempUploadedPhotoBase64 = "";
-    }
-  });
-}
-
-// Compress and read image as Base64 (cropped max 200x200 to protect local storage)
-function compressAndReadPhoto(file, callback) {
-  const reader = new FileReader();
-  reader.readAsDataURL(file);
-  reader.onload = (event) => {
-    const img = new Image();
-    img.src = event.target.result;
-    img.onload = () => {
-      const canvas = document.createElement("canvas");
-      const ctx = canvas.getContext("2d");
-      
-      const MAX_WIDTH = 200;
-      const MAX_HEIGHT = 200;
-      let width = img.width;
-      let height = img.height;
-
-      // Crop to square coordinates
-      let sx = 0, sy = 0, size = Math.min(width, height);
-      if (width > height) {
-        sx = (width - height) / 2;
-      } else {
-        sy = (height - width) / 2;
-      }
-
-      canvas.width = MAX_WIDTH;
-      canvas.height = MAX_HEIGHT;
-      
-      ctx.drawImage(img, sx, sy, size, size, 0, 0, MAX_WIDTH, MAX_HEIGHT);
-      
-      // Export as compressed JPEG
-      const compressedDataUrl = canvas.toDataURL("image/jpeg", 0.75);
-      callback(compressedDataUrl);
+    const users = getUsers();
+    users[_pendingUser.phone] = {
+      name: _pendingUser.name,
+      phone: _pendingUser.phone,
+      passHash: simpleHash(pass),
+      emoji: '🏃',
+      createdAt: Date.now(),
+      level: 1,
+      xp: 0,
+      xpNext: 500,
+      streak: 0,
+      healthScore: 80,
+      totalArea: 0,
+      totalDist: 0,
+      sessions: 0,
     };
+    saveUsers(users);
+    saveSession(_pendingUser.phone);
+
+    // Init game data
+    initGameData(_pendingUser.phone);
+
+    showToast(`🎉 Welcome, ${_pendingUser.name}! Account created!`);
+    hideAuth();
+    bootApp();
+  }
+
+  /* ── Login ── */
+  function login() {
+    const phone = (el('loginPhone')?.value || '').replace(/\D/g,'').trim();
+    const pass  = (el('loginPass')?.value  || '').trim();
+    const fullPhone = _countryCode + phone;
+
+    if (!phone) { showError('Enter your phone number.'); return; }
+    if (!pass)  { showError('Enter your password.'); return; }
+
+    const users = getUsers();
+    const user = users[fullPhone];
+    if (!user) { showError('No account found with this phone number.'); return; }
+    if (user.passHash !== simpleHash(pass)) { showError('Incorrect password. Please try again.'); return; }
+
+    saveSession(fullPhone);
+    showToast(`👋 Welcome back, ${user.name}!`);
+    hideAuth();
+    bootApp();
+  }
+
+  function forgotPassword() {
+    showError('Password reset: Register a new account with the same phone to reset. (Demo: OTP-based reset coming soon)');
+  }
+
+  /* ── Logout ── */
+  function logout() {
+    if (confirm('Sign out of My Territory?')) {
+      localStorage.removeItem(STORE.SESSION);
+      location.reload();
+    }
+  }
+
+  /* ── Error display ── */
+  function showError(msg) {
+    const e = el('authError');
+    if (!e) return;
+    e.textContent = msg;
+    e.classList.remove('hidden');
+    clearTimeout(showError._timer);
+    showError._timer = setTimeout(() => e.classList.add('hidden'), 4000);
+  }
+
+  /* ── Check auth state on load ── */
+  function check() {
+    const session = getSession();
+    if (session) {
+      const user = currentUser();
+      if (user) {
+        hideAuth();
+        return true;
+      }
+    }
+    // Show auth
+    el('authOverlay')?.classList.remove('hidden');
+    return false;
+  }
+
+  function hideAuth() {
+    const overlay = el('authOverlay');
+    if (overlay) {
+      overlay.style.opacity = '0';
+      overlay.style.transform = 'scale(1.04)';
+      overlay.style.transition = 'opacity 0.5s ease, transform 0.5s ease';
+      setTimeout(() => overlay.style.display = 'none', 500);
+    }
+  }
+
+  return {
+    check, currentUser, login, logout, forgotPassword,
+    showRegister, showLogin, back,
+    sendOTP, resendOTP, verifyOTP,
+    otpInput, otpKeydown,
+    createAccount, checkPassStrength, togglePass,
+    toggleCountry, selectCountry,
+    showError,
   };
-}
+})();
 
-// ------------------- Phone OTP + Password Auth (Client-side prototype) -------------------
-// NOTE: This is a client-only prototype. In production, OTPs must be delivered by SMS
-// and user credentials stored on a secure server. Here we use localStorage for demo.
+/* ═══════════════════════════════════════════════
+   GAME DATA INIT + LOAD
+═══════════════════════════════════════════════ */
+const GameData = (() => {
+  let _phone = null;
 
-async function hashPassword(password) {
-  const enc = new TextEncoder();
-  const buf = await crypto.subtle.digest('SHA-256', enc.encode(password));
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
-}
+  function key(k) { return STORE.GAME + _phone + '_' + k; }
 
-function getUsers() {
-  try { return JSON.parse(localStorage.getItem('my_territory_users') || '{}'); }
-  catch (e) { return {}; }
-}
+  function init(phone) {
+    _phone = phone;
+    if (!localStorage.getItem(key('territories'))) {
+      localStorage.setItem(key('territories'), JSON.stringify([]));
+    }
+    if (!localStorage.getItem(key('sessions'))) {
+      localStorage.setItem(key('sessions'), JSON.stringify([]));
+    }
+  }
 
-function saveUsers(users) { localStorage.setItem('my_territory_users', JSON.stringify(users)); }
+  function getTerritories() {
+    try { return JSON.parse(localStorage.getItem(key('territories')) || '[]'); }
+    catch { return []; }
+  }
 
-function createOrUpdateUser(phone, username, passwordHash) {
-  const users = getUsers();
-  users[phone] = users[phone] || {};
-  users[phone].phone = phone;
-  users[phone].username = username || users[phone].username || ('user'+phone.slice(-4));
-  if (passwordHash) users[phone].passwordHash = passwordHash;
-  saveUsers(users);
-}
+  function saveTerritories(arr) {
+    localStorage.setItem(key('territories'), JSON.stringify(arr));
+  }
 
-function verifyPasswordHash(phone, hash) {
-  const users = getUsers();
-  if (!users[phone] || !users[phone].passwordHash) return false;
-  return users[phone].passwordHash === hash;
-}
+  function addTerritory(t) {
+    const arr = getTerritories();
+    arr.push(t);
+    saveTerritories(arr);
+  }
 
-// In-memory OTP store for the session
-window._otpStore = window._otpStore || {};
+  function getSessions() {
+    try { return JSON.parse(localStorage.getItem(key('sessions')) || '[]'); }
+    catch { return []; }
+  }
 
-function generateOtpCode() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
-}
+  function addSession(s) {
+    const arr = getSessions();
+    arr.push(s);
+    localStorage.setItem(key('sessions'), JSON.stringify(arr));
+  }
 
-function sendOtpToPhone(phone) {
-  const code = generateOtpCode();
-  const expires = Date.now() + 5 * 60 * 1000; // 5 minutes
-  window._otpStore[phone] = { code, expires };
-  // For this prototype, display in UI (dev only). In real app send via SMS gateway.
-  const dev = document.getElementById('dev-otp-display');
-  if (dev) dev.innerText = code;
-  return code;
-}
+  function getUser() { return Auth.currentUser(); }
 
-function verifyOtpForPhone(phone, code) {
-  const entry = window._otpStore[phone];
-  if (!entry) return { ok: false, reason: 'no_otp' };
-  if (Date.now() > entry.expires) return { ok: false, reason: 'expired' };
-  if (entry.code !== code) return { ok: false, reason: 'mismatch' };
-  delete window._otpStore[phone];
-  return { ok: true };
-}
+  function updateUser(changes) {
+    const users = JSON.parse(localStorage.getItem(STORE.USERS) || '{}');
+    if (!_phone || !users[_phone]) return;
+    Object.assign(users[_phone], changes);
+    localStorage.setItem(STORE.USERS, JSON.stringify(users));
+  }
 
-// UI helpers for OTP modal
-function openOtpModal(phone, pending) {
-  const modal = document.getElementById('otp-modal');
-  if (!modal) return;
-  const strong = document.getElementById('otp-phone-display').querySelector('strong');
-  if (strong) strong.innerText = phone;
-  document.getElementById('otp-code-input').value = '';
-  modal.classList.remove('hidden');
-  // store pending action
-  window._pendingAuth = pending || null;
-}
+  return { init, getTerritories, saveTerritories, addTerritory, addSession, getUser, updateUser };
+})();
 
-function closeOtpModal() {
-  const modal = document.getElementById('otp-modal');
-  if (!modal) return;
-  modal.classList.add('hidden');
-  window._pendingAuth = null;
-}
+/* ═══════════════════════════════════════════════
+   GPS MODULE
+═══════════════════════════════════════════════ */
+const GPS = (() => {
+  let _watchId = null;
+  let _lastPos = null;
+  let _state = 'idle'; // idle | searching | active | denied | error
+  let _onUpdate = null;
 
-function finishLoginForPhone(phone) {
-  const users = getUsers();
-  const u = users[phone] || { phone, username: 'user'+phone.slice(-4) };
-  // set appState user and UI
-  appState.user = appState.user || {};
-  appState.user.username = u.username;
-  appState.user.avatar = u.avatar || appState.user.avatar || '🏃‍♂️';
-  appState.user.isLoggedIn = true;
-  saveState();
-  // update UI
-  const authScreen = document.getElementById('auth-screen');
-  const mainApp = document.getElementById('main-app');
-  if (authScreen) authScreen.classList.add('hidden');
-  if (mainApp) mainApp.classList.remove('hidden');
-  const headerName = document.getElementById('header-username'); if (headerName) headerName.innerText = appState.user.username;
-  const sideName = document.getElementById('sidebar-username-txt'); if (sideName) sideName.innerText = appState.user.username;
-  showToast('✅ Logged in', `Welcome back, ${appState.user.username}`);
-}
+  function requestPermission() {
+    el('gpsOverlay').classList.add('hidden');
+    if (!navigator.geolocation) {
+      showToast('❌ GPS not supported in this browser.');
+      App.setMode('sim');
+      return;
+    }
+    _setState('searching');
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        _lastPos = pos;
+        _setState('active');
+        el('gpsOverlay').classList.add('hidden');
+        showToast('📍 GPS locked! Start Capture to begin tracking.');
+        startWatch();
+      },
+      (err) => {
+        _setState('error');
+        el('gpsOverlay').classList.add('hidden');
+        showToast(`❌ GPS Error: ${err.message}. Switching to simulation.`);
+        App.setMode('sim');
+      },
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
+    );
+  }
 
-// Wire auth form actions after DOM ready
-document.addEventListener('DOMContentLoaded', () => {
-  const registerForm = document.getElementById('register-form');
-  const loginForm = document.getElementById('login-form');
-  const sendOtpBtn = document.getElementById('send-otp-btn');
-  const otpVerifyBtn = document.getElementById('otp-verify-btn');
-  const otpResendBtn = document.getElementById('otp-resend-btn');
-  const otpCancelBtn = document.getElementById('otp-cancel-btn');
+  function denyPermission() {
+    el('gpsOverlay').classList.add('hidden');
+    App.setMode('sim');
+    showToast('🎮 Using simulation mode instead.');
+  }
 
-  if (registerForm) {
-    registerForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const username = document.getElementById('reg-username').value.trim();
-      const phone = document.getElementById('reg-phone').value.trim();
-      const password = document.getElementById('reg-password').value;
-      if (!phone || !password) { showToast('Missing', 'Please enter phone and password'); return; }
-      const pwdHash = await hashPassword(password);
-      // send OTP and open modal; pending action will create user on verify
-      sendOtpToPhone(phone);
-      openOtpModal(phone, { type: 'register', phone, username, passwordHash: pwdHash });
-      showToast('OTP Sent', `A verification code was sent to ${phone} (dev display)`);
+  function startWatch() {
+    if (_watchId !== null) return;
+    if (!navigator.geolocation) return;
+    _watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        _lastPos = pos;
+        _setState('active');
+        if (_onUpdate) _onUpdate(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy, pos.coords.speed);
+      },
+      (err) => {
+        _setState('error');
+        showToast(`⚠️ GPS signal lost: ${err.message}`);
+      },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+    );
+  }
+
+  function stopWatch() {
+    if (_watchId !== null) {
+      navigator.geolocation.clearWatch(_watchId);
+      _watchId = null;
+    }
+    _setState('idle');
+  }
+
+  function _setState(state) {
+    _state = state;
+    const dot = el('gpsPulseDot');
+    const txt = el('gpsStatusText');
+    if (!dot || !txt) return;
+    uncls(dot, 'searching', 'error');
+    switch (state) {
+      case 'searching':
+        dot.classList.add('searching');
+        txt.textContent = 'Searching for GPS signal...';
+        break;
+      case 'active':
+        txt.textContent = 'GPS Active — tracking';
+        break;
+      case 'error':
+        dot.classList.add('error');
+        txt.textContent = 'GPS signal lost';
+        break;
+      case 'idle':
+        txt.textContent = 'GPS idle';
+        break;
+    }
+  }
+
+  function getState()   { return _state; }
+  function getLastPos() { return _lastPos; }
+  function onUpdate(fn) { _onUpdate = fn; }
+
+  return { requestPermission, denyPermission, startWatch, stopWatch, getState, getLastPos, onUpdate };
+})();
+
+/* ═══════════════════════════════════════════════
+   MAP ENGINE (Leaflet + optional Google Maps)
+═══════════════════════════════════════════════ */
+const MapEngine = (() => {
+  let _map = null;
+  let _playerMarker = null;
+  let _accuracyCircle = null;
+  let _trailPolyline = null;
+  let _territoryPolygons = [];
+  let _rivalMarkers = [];
+  let _useGoogleMaps = false;
+  let _googleLoaded = false;
+  let _gmap = null;
+  let _gmTrail = null;
+  let _gmPlayerMarker = null;
+
+  function init() {
+    if (_map) { setTimeout(() => _map.invalidateSize(), 200); return; }
+
+    // Try to load Google Maps if key is set
+    const gmKey = localStorage.getItem(STORE.GM_KEY);
+    if (gmKey && !_googleLoaded) {
+      loadGoogleMaps(gmKey);
+      return;
+    }
+
+    initLeaflet();
+  }
+
+  function initLeaflet() {
+    const mapEl = el('leafletMap');
+    if (!mapEl || _map) return;
+
+    // Try to center on last known GPS position
+    let lat = 51.505, lng = -0.09;
+    const lastPos = GPS.getLastPos();
+    if (lastPos) { lat = lastPos.coords.latitude; lng = lastPos.coords.longitude; }
+
+    _map = L.map('leafletMap', { center: [lat, lng], zoom: 16, zoomControl: true, attributionControl: false });
+
+    // Dark OSM tiles
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(_map);
+
+    // Player marker
+    _playerMarker = L.marker([lat, lng], { icon: _playerIcon() }).addTo(_map);
+
+    // Trail polyline
+    _trailPolyline = L.polyline([], { color: '#10B981', weight: 4, opacity: 0.9, dashArray: null }).addTo(_map);
+
+    // Draw existing territories
+    drawAllTerritories();
+
+    // Rival markers
+    spawnRivalMarkers(lat, lng);
+
+    // Set GPS update callback
+    GPS.onUpdate((lat, lng, acc, spd) => {
+      updatePlayerPosition(lat, lng, acc, spd);
     });
   }
 
-  if (sendOtpBtn) {
-    sendOtpBtn.addEventListener('click', (e) => {
-      const phone = document.getElementById('login-phone').value.trim();
-      if (!phone) { showToast('Missing', 'Enter phone number to receive OTP'); return; }
-      sendOtpToPhone(phone);
-      openOtpModal(phone, { type: 'login-otp', phone });
-      showToast('OTP Sent', `A verification code was sent to ${phone} (dev display)`);
+  function _playerIcon() {
+    return L.divIcon({
+      className: '',
+      html: `<div style="
+        width:32px;height:32px;
+        background:linear-gradient(135deg,#10B981,#3B82F6);
+        border:3px solid #fff;border-radius:50%;
+        display:flex;align-items:center;justify-content:center;font-size:15px;
+        box-shadow:0 0 16px rgba(16,185,129,0.8),0 0 40px rgba(16,185,129,0.3);
+        animation:gpsPulse 1.5s ease infinite;
+      ">🏃</div>`,
+      iconSize: [32, 32], iconAnchor: [16, 16],
     });
   }
 
-  if (loginForm) {
-    loginForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const phone = document.getElementById('login-phone').value.trim();
-      const password = document.getElementById('login-password').value || '';
-      if (password && phone) {
-        const hash = await hashPassword(password);
-        if (verifyPasswordHash(phone, hash)) {
-          finishLoginForPhone(phone);
-        } else {
-          showToast('Error', 'Invalid phone or password');
-        }
-        return;
+  /* ── Update player position ── */
+  function updatePlayerPosition(lat, lng, accuracy, speed) {
+    if (!_map) return;
+
+    // Move player marker
+    if (_playerMarker) _playerMarker.setLatLng([lat, lng]);
+
+    // Accuracy circle
+    if (_accuracyCircle) {
+      _accuracyCircle.setLatLng([lat, lng]).setRadius(accuracy || 10);
+    } else if (accuracy) {
+      _accuracyCircle = L.circle([lat, lng], {
+        radius: accuracy,
+        color: '#3B82F6', fillColor: '#3B82F6',
+        fillOpacity: 0.08, weight: 1, opacity: 0.4, dashArray: '4',
+      }).addTo(_map);
+    }
+
+    // Update accuracy badge
+    const badge = el('gpsBadge');
+    const accText = el('gpsAccText');
+    if (badge && accText) {
+      badge.classList.remove('hidden');
+      accText.textContent = `GPS: ±${Math.round(accuracy || 0)}m`;
+    }
+
+    // Update coordinate display
+    const coordsEl = el('gpsCoords');
+    if (coordsEl) {
+      coordsEl.textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+    }
+
+    // Update home card
+    const lc = el('lastLocationCard');
+    if (lc) lc.textContent = `📍 ${lat.toFixed(5)}, ${lng.toFixed(5)} · ±${Math.round(accuracy||0)}m`;
+
+    // Pan map to player
+    _map.panTo([lat, lng], { animate: true, duration: 0.5 });
+
+    // Notify App
+    App._onGPSUpdate(lat, lng, accuracy, speed);
+  }
+
+  /* ── Trail ── */
+  function addTrailPoint(lat, lng) {
+    if (!_map || !_trailPolyline) return;
+    const pts = _trailPolyline.getLatLngs();
+    pts.push([lat, lng]);
+    _trailPolyline.setLatLngs(pts);
+  }
+
+  function clearTrail() {
+    if (_trailPolyline) _trailPolyline.setLatLngs([]);
+  }
+
+  function getTrailPoints() {
+    if (!_trailPolyline) return [];
+    return _trailPolyline.getLatLngs().map(p => [p.lat, p.lng]);
+  }
+
+  /* ── Territory Polygons ── */
+  function drawTerritoryPolygon(points, color = '#10B981', label = 'Your Territory') {
+    if (!_map || points.length < 3) return null;
+    const hull = expandHull(convexHull(points));
+    const polygon = L.polygon(hull, {
+      color: color, weight: 2,
+      fillColor: color, fillOpacity: 0.18,
+      dashArray: null,
+    }).addTo(_map);
+    polygon.bindTooltip(label, { permanent: false, direction: 'center' });
+    _territoryPolygons.push(polygon);
+    return polygon;
+  }
+
+  function drawAllTerritories() {
+    const territories = GameData.getTerritories();
+    territories.forEach(t => {
+      if (t.hull && t.hull.length >= 3) {
+        drawTerritoryPolygon(t.hull, '#10B981', t.name);
       }
-      // if no password provided, prompt to use OTP
-      showToast('Info', 'Enter your phone and press "Send OTP" to login via code');
     });
+    // Static rival zones
+    const lat = _map ? _map.getCenter().lat : 51.505;
+    const lng = _map ? _map.getCenter().lng : -0.09;
+    const rivalPoints = [
+      [lat-0.004, lng+0.003], [lat-0.003, lng+0.004],
+      [lat-0.005, lng+0.005], [lat-0.004, lng+0.006],
+    ];
+    L.polygon(rivalPoints, { color:'#EF4444', weight:2, fillColor:'#EF4444', fillOpacity:0.15 })
+      .addTo(_map).bindTooltip('RocketRaj Territory');
+    const neutralPoints = [
+      [lat+0.003, lng+0.002], [lat+0.002, lng+0.004],
+      [lat+0.004, lng+0.005], [lat+0.005, lng+0.003],
+    ];
+    L.polygon(neutralPoints, { color:'#6B7280', weight:1, fillColor:'#6B7280', fillOpacity:0.12 })
+      .addTo(_map).bindTooltip('Neutral Zone');
   }
 
-  if (otpVerifyBtn) {
-    otpVerifyBtn.addEventListener('click', (e) => {
-      const code = document.getElementById('otp-code-input').value.trim();
-      const pending = window._pendingAuth;
-      if (!pending) { showToast('Error', 'No pending action'); return; }
-      const phone = pending.phone;
-      const res = verifyOtpForPhone(phone, code);
-      if (!res.ok) { showToast('OTP Error', res.reason || 'Invalid code'); return; }
-      if (pending.type === 'register') {
-        createOrUpdateUser(pending.phone, pending.username, pending.passwordHash);
-        closeOtpModal();
-        finishLoginForPhone(pending.phone);
-        showToast('Welcome', 'Account created and logged in');
-      } else if (pending.type === 'login-otp') {
-        closeOtpModal();
-        finishLoginForPhone(pending.phone);
-      }
-    });
-  }
-
-  if (otpResendBtn) {
-    otpResendBtn.addEventListener('click', (e) => {
-      const pending = window._pendingAuth;
-      if (!pending) { showToast('Error', 'No pending phone to resend'); return; }
-      sendOtpToPhone(pending.phone);
-      showToast('OTP Sent', `Resent to ${pending.phone} (dev display)`);
-    });
-  }
-
-  if (otpCancelBtn) {
-    otpCancelBtn.addEventListener('click', (e) => {
-      closeOtpModal();
-    });
-  }
-});
-
-// --- Dynamic Navigation & View System ---
-function initNavigation() {
-  const tabs = document.querySelectorAll(".nav-tab, .menu-item");
-  const screens = document.querySelectorAll(".app-screen");
-
-  tabs.forEach(tab => {
-    tab.addEventListener("click", () => {
-      sounds.playClick();
-      const targetScreen = tab.dataset.screen;
-      if (!targetScreen) return; // e.g. logout button
-      
-      tabs.forEach(t => {
-        if (t.dataset.screen === targetScreen) {
-          t.classList.add("active");
-        } else {
-          t.classList.remove("active");
-        }
+  function spawnRivalMarkers(lat, lng) {
+    const rivals = [
+      { lat: lat-0.004, lng: lng+0.003, emoji: '🦁', name: 'RocketRaj' },
+      { lat: lat+0.003, lng: lng-0.002, emoji: '🦊', name: 'FoxFit' },
+    ];
+    rivals.forEach(r => {
+      const icon = L.divIcon({
+        className: '',
+        html: `<div title="${r.name}" style="width:26px;height:26px;background:linear-gradient(135deg,#EF4444,#DC2626);border:2px solid #fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;box-shadow:0 0 10px rgba(239,68,68,0.6);">${r.emoji}</div>`,
+        iconSize: [26, 26], iconAnchor: [13, 13],
       });
-      
-      screens.forEach(s => s.classList.remove("active"));
-      
-      const targetEl = document.getElementById(`screen-${targetScreen}`);
-      if (targetEl) {
-        targetEl.classList.add("active");
-      }
-
-      if (targetScreen === "map") {
-        setTimeout(() => {
-          if (map) {
-            map.invalidateSize();
-          }
-        }, 100);
-      }
-
-      // Re-render decay dashboard whenever Defense or Decay Watch is opened
-      if (targetScreen === "defense" || targetScreen === "decay") {
-        renderDecayDashboard();
-      }
-
-      syncStatsUI();
-    });
-  });
-
-  // Bind Desktop Sidebar Logout button
-  const dLogout = document.getElementById("sidebar-btn-logout");
-  if (dLogout) {
-    dLogout.addEventListener("click", () => {
-      document.getElementById("btn-logout").click();
+      L.marker([r.lat, r.lng], { icon }).addTo(_map).bindPopup(`<b>${r.name}</b><br/>Rival territory`);
     });
   }
-}
 
-// --- Map Capture & GPS Simulation Engine ---
-let map;
-let userMarker;
-let activePolyline;
-let userPos = [37.4270, -122.1700]; // Stanford Oval center coords
-let simulatedPath = [];
-let isTracking = false;
-let trackingStartTime = null;
-let durationTimer = null;
-let activeTerritoryLayers = [];
-let mockCompetitorTimers = [];
+  /* ── Simulation movement ── */
+  function movePlayerSim(dLat, dLng) {
+    if (!_map || !_playerMarker) return;
+    const pos = _playerMarker.getLatLng();
+    const newLat = pos.lat + dLat;
+    const newLng = pos.lng + dLng;
+    _playerMarker.setLatLng([newLat, newLng]);
+    _map.panTo([newLat, newLng], { animate: false });
+    App._onSimMove(newLat, newLng);
+  }
 
-// Geolocation GPS variables
-let gpsWatchId = null;
-let currentTrackingMode = "sim"; // 'sim' or 'device'
-let currentSpeedMode = "walk";
+  function getCenter() {
+    if (_map) return _map.getCenter();
+    return { lat: 51.505, lng: -0.09 };
+  }
 
-const SPEED_FACTORS = {
-  walk: { mS: 1.39, deg: 0.000012 },
-  run:  { mS: 4.17, deg: 0.000036 }
-};
+  function flyTo(lat, lng, zoom = 15) {
+    if (_map) _map.flyTo([lat, lng], zoom, { animate: true, duration: 1 });
+  }
 
-// Auto speed tracking — records peak speed seen in a session
-let sessionPeakSpeedKmH = 0;
-const SPEED_CHEAT_THRESHOLD_KMH = 30; // > 30 km/h = suspected vehicle
+  /* ── Google Maps Support ── */
+  function loadGoogleMaps(apiKey) {
+    if (window.google?.maps) { _googleLoaded = true; initGoogleMap(apiKey); return; }
+    const existing = document.getElementById('gmScript');
+    if (existing) return;
+    const script = document.createElement('script');
+    script.id = 'gmScript';
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&callback=MapEngine._gmCallback`;
+    script.async = true;
+    script.onerror = () => {
+      showToast('❌ Google Maps failed to load. Check your API key. Using OpenStreetMap instead.');
+      el('gmStatus').textContent = '❌ Invalid API key or billing not enabled.';
+      el('gmStatus').className = 'gm-status err';
+      localStorage.removeItem(STORE.GM_KEY);
+      initLeaflet();
+    };
+    window.MapEngine = MapEngine; // Ensure callback is accessible
+    document.head.appendChild(script);
+  }
 
-function initMap() {
-  map = L.map('map-container', {
-    zoomControl: true,
-    attributionControl: false
-  }).setView(userPos, 16);
+  function _gmCallback() {
+    _googleLoaded = true;
+    initGoogleMap(localStorage.getItem(STORE.GM_KEY));
+    el('gmStatus').textContent = '✅ Google Maps loaded successfully!';
+    el('gmStatus').className = 'gm-status ok';
+  }
 
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-    maxZoom: 20
-  }).addTo(map);
+  function initGoogleMap(apiKey) {
+    _useGoogleMaps = true;
+    const mapEl = el('leafletMap');
+    if (!mapEl) return;
+    mapEl.innerHTML = '';
 
-  // Load custom icon
-  updateMapUserMarker();
+    const lastPos = GPS.getLastPos();
+    const center = lastPos
+      ? { lat: lastPos.coords.latitude, lng: lastPos.coords.longitude }
+      : { lat: 51.505, lng: -0.09 };
 
-  // Load existing territories
-  renderTerritories();
-
-  // D-Pad simulator handlers
-  document.getElementById("key-up").addEventListener("click", () => moveUser(0.0001, 0));
-  document.getElementById("key-down").addEventListener("click", () => moveUser(-0.0001, 0));
-  document.getElementById("key-left").addEventListener("click", () => moveUser(0, -0.00012));
-  document.getElementById("key-right").addEventListener("click", () => moveUser(0, 0.00012));
-  
-  // Closing loop pin
-  document.getElementById("key-center").addEventListener("click", () => {
-    sounds.playClick();
-    if (isTracking && simulatedPath.length > 2) {
-      simulatedPath.push([simulatedPath[0][0], simulatedPath[0][1]]);
-      activePolyline.setLatLngs(simulatedPath);
-      completeCapture();
-    }
-  });
-
-  // Keyboard keys listener
-  document.addEventListener("keydown", (e) => {
-    const activeScreen = document.querySelector(".app-screen.active");
-    if (!activeScreen || activeScreen.id !== "screen-map" || currentTrackingMode !== "sim") return;
-
-    if (e.key === "ArrowUp") moveUser(0.00008, 0);
-    else if (e.key === "ArrowDown") moveUser(-0.00008, 0);
-    else if (e.key === "ArrowLeft") moveUser(0, -0.0001);
-    else if (e.key === "ArrowRight") moveUser(0, 0.0001);
-  });
-
-  // Track button triggers
-  document.getElementById("tracker-start-btn").addEventListener("click", startTracking);
-  document.getElementById("tracker-pause-btn").addEventListener("click", pauseTracking);
-  document.getElementById("tracker-stop-btn").addEventListener("click", stopTracking);
-
-  // Speed selectors (walk / run only — car removed, speed is auto-detected)
-  const speedPills = document.querySelectorAll(".speed-pill");
-  speedPills.forEach(pill => {
-    pill.addEventListener("click", () => {
-      sounds.playClick();
-      speedPills.forEach(p => p.classList.remove("active"));
-      pill.classList.add("active");
-      currentSpeedMode = pill.dataset.speed;
+    _gmap = new google.maps.Map(mapEl, {
+      center,
+      zoom: 16,
+      mapTypeId: 'roadmap',
+      styles: DARK_MAP_STYLE,
+      disableDefaultUI: false,
+      zoomControl: true,
     });
-  });
 
-  // Initialize GPS Tracking Mode Switching
-  initGpsModeSelector();
+    // Player marker
+    _gmPlayerMarker = new google.maps.Marker({
+      position: center,
+      map: _gmap,
+      title: 'You',
+      label: { text: '🏃', fontSize: '20px' },
+    });
 
-  // Spawn AI competitors
-  startCompetitorSimulation();
-}
+    // Trail polyline
+    _gmTrail = new google.maps.Polyline({
+      path: [],
+      geodesic: true,
+      strokeColor: '#10B981',
+      strokeWeight: 4,
+      strokeOpacity: 0.9,
+      map: _gmap,
+    });
 
-function updateMapUserMarker() {
-  if (!map) return;
-  
-  let html = "";
-  if (appState.user.avatarImage) {
-    html = `<div class="user-pulse"></div><div class="user-emoji user-avatar-small has-image" style="background-image: url(${appState.user.avatarImage}); width: 40px; height: 40px; border-radius: 50%;"></div>`;
-  } else {
-    html = `<div class="user-pulse"></div><div class="user-emoji">${appState.user.avatar}</div>`;
+    GPS.onUpdate((lat, lng, acc, spd) => {
+      _gmPlayerMarker.setPosition({ lat, lng });
+      _gmap.panTo({ lat, lng });
+      App._onGPSUpdate(lat, lng, acc, spd);
+    });
+
+    showToast('✅ Google Maps loaded!');
   }
 
-  const userIcon = L.divIcon({
-    className: 'custom-user-marker',
-    html: html,
-    iconSize: [40, 40],
-    iconAnchor: [20, 20]
-  });
-
-  if (userMarker) {
-    userMarker.setIcon(userIcon);
-  } else {
-    userMarker = L.marker(userPos, { icon: userIcon }).addTo(map);
+  function addGMTrailPoint(lat, lng) {
+    if (!_gmTrail) return;
+    const path = _gmTrail.getPath();
+    path.push(new google.maps.LatLng(lat, lng));
   }
-}
 
-// GPS Mode Selection: Simulator vs Actual Device GPS
-function initGpsModeSelector() {
-  const btnSim = document.getElementById("gps-mode-sim");
-  const btnDevice = document.getElementById("gps-mode-device");
-  
-  const panelKeypad = document.getElementById("sim-keypad-panel");
-  const panelInstructions = document.getElementById("sim-instructions-panel");
-  const panelSpeed = document.getElementById("sim-speed-panel");
-
-  btnSim.addEventListener("click", () => {
-    sounds.playClick();
-    if (isTracking) {
-      alert("Please stop your active capture session first.");
+  function applyGoogleMapsKey() {
+    const key = (el('gmApiKeyInput')?.value || '').trim();
+    if (!key || !key.startsWith('AIza')) {
+      showToast('❌ Enter a valid Google Maps API key (starts with AIza...)');
+      el('gmStatus').textContent = '❌ Invalid key format.';
+      el('gmStatus').className = 'gm-status err';
       return;
     }
-    
-    currentTrackingMode = "sim";
-    btnSim.classList.add("active");
-    btnDevice.classList.remove("active");
-    
-    // Show simulator guides
-    panelKeypad.classList.remove("hidden");
-    panelInstructions.classList.remove("hidden");
-    panelSpeed.classList.remove("hidden");
-    
-    stopDeviceGpsWatch();
-    showToast("🎮 Simulator Mode Active", "Use keyboard arrow keys or D-Pad controls.");
-  });
-
-  btnDevice.addEventListener("click", () => {
-    sounds.playClick();
-    if (isTracking) {
-      alert("Please stop your active capture session first.");
-      return;
-    }
-
-    currentTrackingMode = "device";
-    btnDevice.classList.add("active");
-    btnSim.classList.remove("active");
-
-    // Hide simulator panels
-    panelKeypad.classList.add("hidden");
-    panelInstructions.classList.add("hidden");
-    panelSpeed.classList.add("hidden");
-
-    // Initiate device GPS tracking permission request
-    startDeviceGpsWatch();
-  });
-}
-
-function startDeviceGpsWatch() {
-  if (!navigator.geolocation) {
-    showToast("⚠️ Geolocation Error", "This browser doesn't support GPS tracking. Falling back to Simulator.");
-    document.getElementById("gps-mode-sim").click();
-    return;
+    localStorage.setItem(STORE.GM_KEY, key);
+    el('gmStatus').textContent = '⏳ Loading Google Maps...';
+    loadGoogleMaps(key);
+    showToast('🗺️ Loading Google Maps...');
   }
 
-  showToast("📡 Requesting GPS", "Awaiting location permission from your device...");
-
-  gpsWatchId = navigator.geolocation.watchPosition(
-    (position) => {
-      const lat = position.coords.latitude;
-      const lng = position.coords.longitude;
-      const accuracy = position.coords.accuracy;
-      
-      // Update coordinates
-      userPos = [lat, lng];
-      userMarker.setLatLng(userPos);
-      map.setView(userPos, 17);
-
-      // Handle speed mapping
-      let speedKmH = 0;
-      if (position.coords.speed !== null && position.coords.speed !== undefined) {
-        speedKmH = position.coords.speed * 3.6; // convert m/s to km/h
-      } else {
-        // Fallback speed simulation
-        speedKmH = isTracking ? 5.2 : 0;
-      }
-      
-      if (isTracking && activePolyline) {
-        simulatedPath.push([lat, lng]);
-        activePolyline.setLatLngs(simulatedPath);
-        activePolyline.bringToFront();
-        
-        // Calculate statistics and check loops
-        calculateStats();
-        checkLoopClosure();
-        
-        // Auto speed cheat detection — block if speed > 30 km/h
-        if (speedKmH > sessionPeakSpeedKmH) sessionPeakSpeedKmH = speedKmH;
-        const cheatAlertEl = document.getElementById("cheat-alert");
-        if (speedKmH > SPEED_CHEAT_THRESHOLD_KMH) {
-          cheatAlertEl.classList.remove("hidden");
-          sounds.playAlert();
-        } else {
-          cheatAlertEl.classList.add("hidden");
-        }
-      }
-
-      document.getElementById("track-speed").innerText = `${speedKmH.toFixed(1)} km/h`;
-    },
-    (err) => {
-      console.warn("GPS tracking error:", err);
-      showToast("⚠️ GPS Location Failure", "Could not capture device location. Switching to Simulator.");
-      document.getElementById("gps-mode-sim").click();
-    },
-    {
-      enableHighAccuracy: true,
-      maximumAge: 1000,
-      timeout: 10000
-    }
-  );
-}
-
-function stopDeviceGpsWatch() {
-  if (gpsWatchId !== null) {
-    navigator.geolocation.clearWatch(gpsWatchId);
-    gpsWatchId = null;
-  }
-}
-
-function renderTerritories() {
-  activeTerritoryLayers.forEach(l => map.removeLayer(l));
-  activeTerritoryLayers = [];
-
-  appState.territories.forEach(terr => {
-    let color = "#9ca3af";
-    let fillOpacity = 0.2;
-    let className = 'territory-layer';
-
-    if (terr.owner === 'user') {
-      color = "#3B82F6";
-      fillOpacity = terr.strength / 200;
-      className = `territory-user glow-strength-${Math.ceil(terr.strength / 20)}`;
-    } else if (terr.owner === 'alpha') {
-      color = "#A855F7";
-      fillOpacity = terr.strength / 200;
-    } else if (terr.owner === 'beta') {
-      color = "#EC4899";
-      fillOpacity = terr.strength / 200;
-    } else if (terr.owner === 'zone') {
-      color = "#10B981";
-      fillOpacity = 0.35;
-    }
-
-    const polygon = L.polygon(terr.points, {
-      color: color,
-      fillColor: color,
-      fillOpacity: fillOpacity,
-      weight: terr.owner === 'user' ? 3 : 2,
-      dashArray: terr.strength < 40 && terr.owner !== 'zone' ? '5, 5' : null,
-      className: className
-    }).addTo(map);
-
-    polygon.bindPopup(`
-      <div class="popup-content" style="color:#fff;">
-        <h4 style="margin: 0 0 4px 0; color: ${color}; font-size: 14px;">${terr.name}</h4>
-        <p style="margin:0; font-size: 11px;">Owner: <b>${terr.owner === 'user' ? 'You' : terr.owner.toUpperCase() + ' (AI)'}</b></p>
-        <p style="margin:0; font-size: 11px;">Strength: <b>${terr.strength}%</b> ${terr.strength < 40 ? '⚠️ Decay Warning!' : ''}</p>
-        <button onclick="revisitTerritory('${terr.id}')" style="margin-top:6px; background:${color}; border:none; padding:4px 8px; color:#fff; border-radius:4px; font-size:10px; cursor:pointer; font-weight:bold;">🛡️ Boost Strength (+20)</button>
-      </div>
-    `);
-
-    activeTerritoryLayers.push(polygon);
-  });
-}
-
-window.revisitTerritory = function(id) {
-  sounds.playClick();
-  const terr = appState.territories.find(t => t.id === id);
-  if (terr) {
-    if (terr.owner !== 'user') {
-      showToast("🛡️ Battle!", "You must capture this enemy zone by walking around it!");
-      return;
-    }
-    terr.strength = Math.min(100, terr.strength + 20);
-    
-    // Add revisit quest progress
-    const revisitQuest = appState.challenges.find(c => c.id === "c3");
-    if (revisitQuest && !revisitQuest.completed) {
-      revisitQuest.progress = 1;
-      checkQuestCompletion();
-    }
-    const defQuest = appState.challenges.find(c => c.id === "c5");
-    if (defQuest && !defQuest.completed && terr.strength - 20 < 50) {
-      defQuest.progress = 1;
-      checkQuestCompletion();
-    }
-
-    addXP(30);
-    showToast("🛡️ Territory Boosted!", `Revisited ${terr.name}. Strength increased to ${terr.strength}% (+30 XP)`);
-    renderTerritories();
-    saveState();
-    syncStatsUI();
-  }
-};
-
-function moveUser(latOffset, lngOffset) {
-  if (currentTrackingMode !== "sim") return; // Keypad movements blocked in Device mode
-
-  const currentSpeedObj = SPEED_FACTORS[currentSpeedMode];
-  const factor = currentSpeedMode === "walk" ? 1 : (currentSpeedMode === "run" ? 2.5 : 5);
-  
-  userPos[0] += latOffset * factor;
-  userPos[1] += lngOffset * factor;
-
-  userMarker.setLatLng(userPos);
-  map.panTo(userPos);
-
-  if (isTracking && activePolyline) {
-    simulatedPath.push([userPos[0], userPos[1]]);
-    activePolyline.setLatLngs(simulatedPath);
-    activePolyline.bringToFront();
-
-    calculateStats();
-    checkLoopClosure();
-  }
-}
-
-function startTracking() {
-  sounds.playClick();
-
-  window.maxSessionDist = 0;  // Reset session distance tracker
-  sessionPeakSpeedKmH = 0;    // Reset peak speed for this session
-  isTracking = true;
-  simulatedPath = [[userPos[0], userPos[1]]];
-  trackingStartTime = new Date();
-
-  // Show active bar
-  document.getElementById("active-workout-bar").classList.remove("hidden");
-  document.getElementById("active-workout-text").innerText = currentTrackingMode === "sim" ? "Active Session • Simulating Movement" : "Active Session • Real GPS Tracking";
-  
-  document.getElementById("tracker-start-btn").classList.add("hidden");
-  document.getElementById("tracker-pause-btn").classList.remove("hidden");
-  document.getElementById("tracker-stop-btn").classList.remove("hidden");
-
-  // Reset stats
-  document.getElementById("track-distance").innerText = "0.00 km";
-  document.getElementById("track-duration").innerText = "00:00";
-  document.getElementById("track-live-area").innerText = "0 m²";
-  document.getElementById("track-speed").innerText = currentTrackingMode === "sim" ? (currentSpeedMode === "walk" ? "5.0 km/h" : "15.0 km/h") : "0.0 km/h";
-
-  // Create line (Neon Yellow/Gold with thick stroke for high visibility)
-  activePolyline = L.polyline(simulatedPath, {
-    color: '#FBBF24',
-    weight: 5,
-    opacity: 0.95,
-    className: 'active-capture-line'
-  }).addTo(map);
-  activePolyline.bringToFront();
-
-  let seconds = 0;
-  durationTimer = setInterval(() => {
-    seconds++;
-    const mins = Math.floor(seconds / 60).toString().padStart(2, '0');
-    const secs = (seconds % 60).toString().padStart(2, '0');
-    document.getElementById("track-duration").innerText = `${mins}:${secs}`;
-    
-    // Simulated minor GPS drift (Simulator mode only)
-    if (currentTrackingMode === "sim" && Math.random() > 0.8) {
-      moveUser((Math.random() - 0.5) * 0.00001, (Math.random() - 0.5) * 0.00001);
-    }
-  }, 1000);
-
-  showToast("🏃‍♂️ Capture Started!", "Walk around an area and complete the loop to capture it!");
-}
-
-function pauseTracking() {
-  sounds.playClick();
-  isTracking = false;
-  clearInterval(durationTimer);
-  document.getElementById("tracker-pause-btn").innerText = "Resume";
-  // Remove pause listener to bind resume handler
-  document.getElementById("tracker-pause-btn").removeEventListener("click", pauseTracking);
-  document.getElementById("tracker-pause-btn").addEventListener("click", resumeTracking, { once: true });
-}
-
-function resumeTracking() {
-  sounds.playClick();
-  isTracking = true;
-  document.getElementById("tracker-pause-btn").innerText = "Pause";
-  
-  // Re-start clock
-  let timeStr = document.getElementById("track-duration").innerText;
-  let timeParts = timeStr.split(":");
-  let seconds = parseInt(timeParts[0]) * 60 + parseInt(timeParts[1]);
-
-  durationTimer = setInterval(() => {
-    seconds++;
-    const mins = Math.floor(seconds / 60).toString().padStart(2, '0');
-    const secs = (seconds % 60).toString().padStart(2, '0');
-    document.getElementById("track-duration").innerText = `${mins}:${secs}`;
-  }, 1000);
-
-  document.getElementById("tracker-pause-btn").removeEventListener("click", resumeTracking);
-  document.getElementById("tracker-pause-btn").addEventListener("click", pauseTracking);
-}
-
-function stopTracking() {
-  sounds.playClick();
-  isTracking = false;
-  clearInterval(durationTimer);
-
-  document.getElementById("active-workout-bar").classList.add("hidden");
-  document.getElementById("tracker-start-btn").classList.remove("hidden");
-  document.getElementById("tracker-pause-btn").classList.add("hidden");
-  document.getElementById("tracker-stop-btn").classList.add("hidden");
-  document.getElementById("cheat-alert").classList.add("hidden");
-
-  if (activePolyline) {
-    map.removeLayer(activePolyline);
+  function clearGoogleMapsKey() {
+    localStorage.removeItem(STORE.GM_KEY);
+    el('gmStatus').textContent = 'Google Maps key cleared. Using OpenStreetMap.';
+    el('gmStatus').className = 'gm-status';
+    el('gmApiKeyInput').value = '';
+    showToast('🗺️ Reverted to OpenStreetMap.');
   }
 
-  showToast("⏹️ Session Finished", "Workout summary generated. Keep walking to claim areas!");
-}
-
-// Compute live real-time polygon area during active session (before closing loop)
-function calculateLiveEstArea() {
-  if (simulatedPath.length < 3) return 0;
-
-  // Temporarily clone the path and append user's start position to form a closed polygon
-  const pathClone = JSON.parse(JSON.stringify(simulatedPath));
-  pathClone.push([pathClone[0][0], pathClone[0][1]]);
-
-  // Convert coords relative to origin to compute area in square meters
-  const origin = pathClone[0];
-  const x = [];
-  const y = [];
-
-  pathClone.forEach(coord => {
-    const dx = (coord[1] - origin[1]) * 111300 * Math.cos(origin[0] * Math.PI / 180);
-    const dy = (coord[0] - origin[0]) * 111300;
-    x.push(dx);
-    y.push(dy);
-  });
-
-  // Shoelace Area Formula
-  let sum1 = 0;
-  let sum2 = 0;
-  for (let i = 0; i < x.length - 1; i++) {
-    sum1 += x[i] * y[i+1];
-    sum2 += y[i] * x[i+1];
-  }
-  
-  return Math.round(Math.abs(sum1 - sum2) * 0.5);
-}
-
-function calculateStats() {
-  if (simulatedPath.length < 2) return;
-
-  let distMeters = 0;
-  for (let i = 1; i < simulatedPath.length; i++) {
-    const p1 = L.latLng(simulatedPath[i-1][0], simulatedPath[i-1][1]);
-    const p2 = L.latLng(simulatedPath[i][0], simulatedPath[i][1]);
-    distMeters += p1.distanceTo(p2);
+  /* Load existing GM key into input */
+  function loadSavedGMKey() {
+    const k = localStorage.getItem(STORE.GM_KEY);
+    if (k && el('gmApiKeyInput')) el('gmApiKeyInput').value = k;
   }
 
-  const distKm = distMeters / 1000;
-  document.getElementById("track-distance").innerText = `${distKm.toFixed(2)} km`;
+  return {
+    init, clearTrail, addTrailPoint, getTrailPoints,
+    drawTerritoryPolygon, drawAllTerritories,
+    movePlayerSim, getCenter, flyTo,
+    updatePlayerPosition, _gmCallback,
+    applyGoogleMapsKey, clearGoogleMapsKey, loadSavedGMKey,
+  };
+})();
 
-  // Live estimated loop area
-  const estArea = calculateLiveEstArea();
-  document.getElementById("track-live-area").innerText = `${estArea.toLocaleString()} m²`;
-
-  // ── Auto speed detection ────────────────────────────────────────────────
-  // Simulator: use selected speed setting + minor drift
-  // Real GPS:  derive from last two path points (steps fire ~1/s)
-  let currentSpeedKmH = 0;
-  if (currentTrackingMode === "sim") {
-    const baseSpeed = currentSpeedMode === "walk" ? 5 : 15;
-    currentSpeedKmH = baseSpeed + (Math.random() - 0.5) * 0.5;
-  } else {
-    if (simulatedPath.length >= 2) {
-      const last = simulatedPath[simulatedPath.length - 1];
-      const prev = simulatedPath[simulatedPath.length - 2];
-      const stepM = L.latLng(prev[0], prev[1]).distanceTo(L.latLng(last[0], last[1]));
-      currentSpeedKmH = stepM * 3.6; // m/s → km/h (1 step ≈ 1 s)
-    }
-  }
-
-  document.getElementById("track-speed").innerText = `${currentSpeedKmH.toFixed(1)} km/h`;
-
-  // Track peak speed for this session
-  if (currentSpeedKmH > sessionPeakSpeedKmH) sessionPeakSpeedKmH = currentSpeedKmH;
-
-  // ── Live cheat alert ────────────────────────────────────────────────────
-  const cheatAlert = document.getElementById("cheat-alert");
-  if (currentSpeedKmH > SPEED_CHEAT_THRESHOLD_KMH) {
-    cheatAlert.classList.remove("hidden");
-    sounds.playAlert();
-  } else {
-    cheatAlert.classList.add("hidden");
-  }
-
-  // Update Daily Challenge progress (c1: distance)
-  const distQuest = appState.challenges.find(c => c.id === "c1");
-  if (distQuest && !distQuest.completed) {
-    distQuest.progress = Math.min(distQuest.max, 0.8 + distKm);
-    checkQuestCompletion();
-  }
-}
-
-function checkLoopClosure() {
-  if (simulatedPath.length < 15) return; // Need more coordinates for valid loops
-
-  const startPoint = L.latLng(simulatedPath[0][0], simulatedPath[0][1]);
-  const head = L.latLng(simulatedPath[simulatedPath.length - 1][0], simulatedPath[simulatedPath.length - 1][1]);
-  
-  // Check user distance from the session start coordinate
-  const currentDistFromStart = head.distanceTo(startPoint);
-  
-  if (!window.maxSessionDist) window.maxSessionDist = 0;
-  if (currentDistFromStart > window.maxSessionDist) {
-    window.maxSessionDist = currentDistFromStart;
-  }
-
-  // Prevent auto-closing loop unless user has traveled at least 20 meters away from start point first
-  if (window.maxSessionDist < 20) return;
-
-  // ONLY check for closure against the starting region of the path (indices 0 to 5)
-  // This prevents the user from "colliding" with the path directly behind them while walking
-  for (let i = 0; i < Math.min(6, simulatedPath.length - 10); i++) {
-    const point = L.latLng(simulatedPath[i][0], simulatedPath[i][1]);
-    const dist = head.distanceTo(point);
-
-    if (dist < 15) { // 15 meters closure threshold to the start
-      simulatedPath.push([simulatedPath[i][0], simulatedPath[i][1]]);
-      activePolyline.setLatLngs(simulatedPath);
-      completeCapture();
-      break;
-    }
-  }
-}
-
-function completeCapture() {
-  isTracking = false;
-  clearInterval(durationTimer);
-  sounds.playCapture();
-
-  const estArea = calculateLiveEstArea();
-
-  if (estArea > 100) {
-    // ── Auto speed cheat check: reject if peak session speed > 30 km/h ──
-    const isTooFast = sessionPeakSpeedKmH > SPEED_CHEAT_THRESHOLD_KMH;
-
-    if (isTooFast) {
-      sounds.playAlert();
-      showToast("❌ Cheat Detected!", `Peak speed of ${sessionPeakSpeedKmH.toFixed(1)} km/h exceeded the 30 km/h limit. Walk or run to capture!`);
-    } else {
-      const newTerrId = "user-capture-" + Date.now();
-      const newTerrName = "Sector " + (appState.territories.length + 1);
-      
-      const newTerr = {
-        id: newTerrId,
-        owner: "user",
-        name: newTerrName,
-        strength: 100,
-        area: estArea, // save calculated area for decay calculations
-        points: JSON.parse(JSON.stringify(simulatedPath))
-      };
-
-      appState.territories.push(newTerr);
-      appState.user.totalCapturedArea += estArea;
-
-      const xpGained = 50 + Math.floor(estArea / 500);
-      addXP(xpGained);
-
-      // Challenge update (Weekly c4: capture 3 separate regions)
-      const captureWeekly = appState.challenges.find(c => c.id === "c4");
-      if (captureWeekly && !captureWeekly.completed) {
-        captureWeekly.progress = Math.min(captureWeekly.max, captureWeekly.progress + 1);
-        checkQuestCompletion();
-      }
-
-      showToast("🎉 Area Captured!", `Successfully claimed ${newTerrName} (${estArea.toLocaleString()} m²)! Earned +${xpGained} XP.`);
-      renderTerritories();
-      saveState();
-      syncStatsUI();
-    }
-  }
-
-  // Restore screen layout
-  document.getElementById("active-workout-bar").classList.add("hidden");
-  document.getElementById("tracker-start-btn").classList.remove("hidden");
-  document.getElementById("tracker-pause-btn").classList.add("hidden");
-  document.getElementById("tracker-stop-btn").classList.add("hidden");
-  document.getElementById("cheat-alert").classList.add("hidden");
-  
-  if (activePolyline) {
-    map.removeLayer(activePolyline);
-  }
-}
-
-// Simulate AI Runners capturing territories
-function startCompetitorSimulation() {
-  const competitor1Loc = [37.4285, -122.1690];
-  const competitor2Loc = [37.4258, -122.1690];
-
-  const cTimer = setInterval(() => {
-    competitor1Loc[0] += (Math.random() - 0.5) * 0.0002;
-    competitor1Loc[1] += (Math.random() - 0.5) * 0.00025;
-
-    competitor2Loc[0] += (Math.random() - 0.5) * 0.0002;
-    competitor2Loc[1] += (Math.random() - 0.5) * 0.00025;
-
-    if (Math.random() > 0.85 && map) {
-      const isAlpha = Math.random() > 0.5;
-      const owner = isAlpha ? 'alpha' : 'beta';
-      const startLoc = isAlpha ? competitor1Loc : competitor2Loc;
-
-      const newPt = [
-        [startLoc[0] - 0.0004, startLoc[1] - 0.0005],
-        [startLoc[0] + 0.0004, startLoc[1] - 0.0005],
-        [startLoc[0] + 0.0004, startLoc[1] + 0.0005],
-        [startLoc[0] - 0.0004, startLoc[1] + 0.0005]
-      ];
-
-      const newAiTerr = {
-        id: `ai-${owner}-${Date.now()}`,
-        owner: owner,
-        name: `${owner === 'alpha' ? 'Alpha' : 'Beta'} Sector`,
-        strength: 80,
-        points: newPt
-      };
-
-      appState.territories.push(newAiTerr);
-      renderTerritories();
-
-      if (Math.random() > 0.6) {
-        showGuardianNotification("⚔️ Territory Under Attack!", `Opponent ${owner.toUpperCase()} has captured territory near you! Go defend your turf.`);
-      }
-    }
-  }, 10000);
-
-  mockCompetitorTimers.push(cTimer);
-}
-
-// --- XP Level Management ---
-const LEVEL_TITLES = [
-  "Beginner",
-  "Explorer",
-  "Challenger",
-  "Champion",
-  "Legend"
+/* ═══════════════════════════════════════════════
+   GOOGLE MAPS DARK STYLE
+═══════════════════════════════════════════════ */
+const DARK_MAP_STYLE = [
+  {elementType:'geometry',stylers:[{color:'#1a2535'}]},
+  {elementType:'labels.text.stroke',stylers:[{color:'#0d1623'}]},
+  {elementType:'labels.text.fill',stylers:[{color:'#746855'}]},
+  {featureType:'administrative.locality',elementType:'labels.text.fill',stylers:[{color:'#d59563'}]},
+  {featureType:'poi',elementType:'labels.text.fill',stylers:[{color:'#d59563'}]},
+  {featureType:'poi.park',elementType:'geometry',stylers:[{color:'#263c3f'}]},
+  {featureType:'poi.park',elementType:'labels.text.fill',stylers:[{color:'#6b9a76'}]},
+  {featureType:'road',elementType:'geometry',stylers:[{color:'#263548'}]},
+  {featureType:'road',elementType:'geometry.stroke',stylers:[{color:'#212a37'}]},
+  {featureType:'road',elementType:'labels.text.fill',stylers:[{color:'#9ca5b3'}]},
+  {featureType:'road.highway',elementType:'geometry',stylers:[{color:'#746855'}]},
+  {featureType:'road.highway',elementType:'geometry.stroke',stylers:[{color:'#1f2835'}]},
+  {featureType:'transit',elementType:'geometry',stylers:[{color:'#2f3948'}]},
+  {featureType:'water',elementType:'geometry',stylers:[{color:'#0c111f'}]},
+  {featureType:'water',elementType:'labels.text.fill',stylers:[{color:'#515c6d'}]},
 ];
 
-function addXP(amount) {
-  appState.user.xp += amount;
-  
-  const xpQuest = appState.challenges.find(c => c.id === "c2");
-  if (xpQuest && !xpQuest.completed) {
-    xpQuest.progress = Math.min(xpQuest.max, xpQuest.progress + amount);
-    checkQuestCompletion();
-  }
+/* ═══════════════════════════════════════════════
+   MAIN APP
+═══════════════════════════════════════════════ */
+const App = (() => {
 
-  if (appState.user.xp >= appState.user.xpMax) {
-    appState.user.xp -= appState.user.xpMax;
-    appState.user.level++;
-    appState.user.xpMax = 1000 + (appState.user.level - 1) * 200;
-    triggerLevelUpModal();
-  }
-  
-  saveState();
-  syncStatsUI();
-}
+  /* ── STATE ── */
+  const state = {
+    screen: 'home',
+    mode: 'sim',
+    speedMode: 'walk',
+    session: { active: false, paused: false, startTime: 0, distance: 0, time: 0 },
+    dpad: { interval: null },
+    simPos: { lat: 51.505, lng: -0.09 },
+    quests: { tab: 'daily' },
+    leader: { tab: 'local' },
+    coachHistory: [],
+    sessionTrailPoints: [],
+  };
 
-function triggerLevelUpModal() {
-  const modal = document.getElementById("level-up-modal");
-  const rankTitle = getRankTitle(appState.user.level);
-  
-  document.getElementById("modal-level-badge").innerText = rankTitle;
-  document.getElementById("modal-level-num").innerText = appState.user.level;
-  
-  modal.classList.remove("hidden");
-  sounds.playLevelUp();
-  createConfetti();
-}
+  let _sessionTimer = null;
 
-function getRankTitle(level) {
-  if (level <= 3) return LEVEL_TITLES[0];
-  if (level <= 7) return LEVEL_TITLES[1];
-  if (level <= 11) return LEVEL_TITLES[2];
-  if (level <= 15) return LEVEL_TITLES[3];
-  return LEVEL_TITLES[4];
-}
+  /* ── STATIC DATA ── */
+  const DAILY_QUESTS = [
+    { id:'q1', icon:'🚶', name:'Walk 5,000 Steps',     sub:'Daily step goal',   xp:50,  progress:72, color:'green' },
+    { id:'q2', icon:'🗺️', name:'Capture 1 Territory',  sub:'Claim new land',    xp:100, progress:0,  color:'blue' },
+    { id:'q3', icon:'🔥', name:'Maintain Streak',       sub:'Stay consistent',   xp:30,  progress:100,color:'orange' },
+    { id:'q4', icon:'🏃', name:'Run 2km',               sub:'Cardio challenge',  xp:80,  progress:45, color:'green' },
+  ];
+  const WEEKLY_QUESTS = [
+    { id:'w1', icon:'🏆', name:'Run 20km This Week',    sub:'Weekly distance',   xp:300, progress:55, color:'green' },
+    { id:'w2', icon:'🏙️', name:'Capture 3 Territories', sub:'Expand your empire',xp:500, progress:33, color:'blue' },
+    { id:'w3', icon:'👥', name:'Beat 5 Rivals',          sub:'Competitive mode',  xp:400, progress:20, color:'purple' },
+    { id:'w4', icon:'🔥', name:'5-Day Streak',           sub:'Consistency is key',xp:200, progress:100,color:'orange' },
+  ];
+  const BADGES = [
+    { em:'🏃', name:'First Run',   unlocked:true  },
+    { em:'🔥', name:'7-Day Streak',unlocked:false },
+    { em:'🏙️', name:'Urban Runner',unlocked:false },
+    { em:'🛡️', name:'Defender',    unlocked:false },
+    { em:'🗺️', name:'Explorer',    unlocked:false },
+    { em:'⚡', name:'Speed King',  unlocked:false },
+    { em:'🏆', name:'Legend',      unlocked:false },
+    { em:'🌍', name:'Global Top10',unlocked:false },
+  ];
+  const LEADERBOARD = {
+    local: [
+      { name:'Smarty',    emoji:'🏃', xp:700, area:'24.5k m²', you:true, rank:1 },
+      { name:'RocketRaj', emoji:'🦁', xp:640, area:'22.1k m²', rank:2 },
+      { name:'FoxFit',    emoji:'🦊', xp:590, area:'18.3k m²', rank:3 },
+      { name:'SwiftSara', emoji:'⚡', xp:550, area:'17.0k m²', rank:4 },
+      { name:'ZenRunner', emoji:'🧘', xp:480, area:'14.9k m²', rank:5 },
+    ],
+    global: [
+      { name:'BlazeMaster',emoji:'🔥', xp:4200,area:'180k m²', rank:1 },
+      { name:'NightOwl',   emoji:'🦉', xp:3900,area:'162k m²', rank:2 },
+      { name:'VaultX',     emoji:'⚡', xp:3450,area:'144k m²', rank:3 },
+    ],
+  };
 
-function createConfetti() {
-  const container = document.getElementById("confetti-canvas-container");
-  container.innerHTML = "";
-  const colors = ["#10B981", "#3B82F6", "#F59E0B", "#EF4444", "#EC4899", "#A855F7"];
-  
-  for (let i = 0; i < 50; i++) {
-    const piece = document.createElement("div");
-    piece.className = "confetti-piece";
-    piece.style.left = Math.random() * 100 + "%";
-    piece.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
-    piece.style.animationDelay = Math.random() * 2 + "s";
-    piece.style.transform = `scale(${Math.random() * 0.8 + 0.4})`;
-    container.appendChild(piece);
-  }
-}
+  /* ── NAVIGATION ── */
+  function navigate(screenId) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+    const screen = el(`screen-${screenId}`);
+    if (screen) screen.classList.add('active');
+    const tab = document.querySelector(`.nav-tab[data-screen="${screenId}"]`);
+    if (tab) tab.classList.add('active');
+    state.screen = screenId;
 
-// --- Challenges & Missions Cabinet ---
-function renderMissions() {
-  const dailyContainer = document.getElementById("daily-mission-list");
-  const fullContainer = document.getElementById("challenges-list-full");
-  const badgesContainer = document.getElementById("badges-grid-container");
-
-  dailyContainer.innerHTML = "";
-  fullContainer.innerHTML = "";
-  badgesContainer.innerHTML = "";
-
-  // Render Dashboard Daily items (always daily)
-  appState.challenges.filter(c => c.type === "daily").forEach(quest => {
-    const progressPercent = (quest.progress / quest.max) * 100;
-    const card = document.createElement("div");
-    card.className = `mission-card ${quest.completed ? 'completed' : ''}`;
-    card.innerHTML = `
-      <div class="mission-badge-icon">${quest.badge}</div>
-      <div class="mission-info">
-        <h4>${quest.title}</h4>
-        <div class="mission-reward-tag"><i class="fa-solid fa-bolt"></i> +${quest.xpReward} XP</div>
-        <div class="mission-progress-bar">
-          <div class="mission-progress-fill" style="width: ${progressPercent}%"></div>
-        </div>
-      </div>
-      <div class="mission-checkbox">
-        <i class="fa-solid fa-check"></i>
-      </div>
-    `;
-    dailyContainer.appendChild(card);
-  });
-
-  // Render filter list in challenges (Based on Daily / Weekly selected tab filter)
-  const filteredQuests = appState.challenges.filter(c => c.type === activeChallengeFilter);
-  
-  filteredQuests.forEach(quest => {
-    const progressPercent = (quest.progress / quest.max) * 100;
-    const card = document.createElement("div");
-    card.className = `mission-card ${quest.completed ? 'completed' : ''}`;
-    card.innerHTML = `
-      <div class="mission-badge-icon">${quest.badge}</div>
-      <div class="mission-info">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <h4>${quest.title}</h4>
-          <span style="font-size:10px; opacity:0.6; text-transform:uppercase;">${quest.type}</span>
-        </div>
-        <p class="mission-desc">${quest.desc}</p>
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px;">
-          <div class="mission-reward-tag"><i class="fa-solid fa-bolt"></i> +${quest.xpReward} XP</div>
-          <span style="font-size:11px; font-weight:700;">${quest.progress.toFixed(1)} / ${quest.max} ${quest.unit}</span>
-        </div>
-        <div class="mission-progress-bar">
-          <div class="mission-progress-fill" style="width: ${progressPercent}%"></div>
-        </div>
-      </div>
-      <div class="mission-checkbox">
-        <i class="fa-solid fa-check"></i>
-      </div>
-    `;
-    fullContainer.appendChild(card);
-  });
-
-  // Render badges
-  appState.badges.forEach(badge => {
-    const item = document.createElement("div");
-    item.className = `badge-item ${badge.unlocked ? '' : 'locked'}`;
-    item.title = badge.desc;
-    item.innerHTML = `
-      <div class="badge-icon">${badge.icon}</div>
-      <div class="badge-name">${badge.name}</div>
-    `;
-    badgesContainer.appendChild(item);
-  });
-}
-
-function checkQuestCompletion() {
-  appState.challenges.forEach(quest => {
-    if (!quest.completed && quest.progress >= quest.max) {
-      quest.completed = true;
-      addXP(quest.xpReward);
-      showToast("🏆 Challenge Completed!", `Nice job! Completed "${quest.title}" and earned +${quest.xpReward} XP.`);
-      
-      if (quest.id === "c3") {
-        const badge = appState.badges.find(b => b.id === "b3");
-        if (badge && !badge.unlocked) {
-          badge.unlocked = true;
-          showToast("🎖️ Badge Unlocked!", `Earned the "${badge.name}" Badge!`);
-        }
-      }
+    switch (screenId) {
+      case 'home':        renderHome();        break;
+      case 'map':         MapEngine.init(); renderMapUI(); break;
+      case 'defense':     renderDefense();     break;
+      case 'challenges':  renderChallenges();  break;
+      case 'leaderboard': renderLeaderboard(); break;
+      case 'coach':       renderCoach();       break;
+      case 'profile':     renderProfile();     break;
     }
-  });
-  saveState();
-  renderMissions();
-}
-
-// Challenges Tab click handler initialization
-function initChallengesFilter() {
-  const tabs = document.querySelectorAll("#challenges-tabs .tab-sub");
-  tabs.forEach(tab => {
-    tab.addEventListener("click", () => {
-      sounds.playClick();
-      tabs.forEach(t => t.classList.remove("active"));
-      tab.classList.add("active");
-      activeChallengeFilter = tab.dataset.filter;
-      renderMissions();
-    });
-  });
-}
-
-// --- Dynamic Leaderboards ---
-function renderLeaderboard() {
-  const itemsContainer = document.getElementById("leaderboard-items");
-  itemsContainer.innerHTML = "";
-
-  appState.leaderboard.sort((a, b) => b.score - a.score);
-
-  appState.leaderboard.forEach((item, index) => {
-    item.rank = index + 1;
-    
-    let medal = item.rank;
-    if (item.rank === 1) medal = "🥇";
-    else if (item.rank === 2) medal = "🥈";
-    else if (item.rank === 3) medal = "🥉";
-
-    // Setup custom visual avatar image overlay if user rank
-    let avatarHtml = `<div class="leader-avatar">${item.avatar}</div>`;
-    if (item.isUser && appState.user.avatarImage) {
-      avatarHtml = `<div class="leader-avatar has-image" style="background-image: url(${appState.user.avatarImage});"></div>`;
-    }
-
-    const div = document.createElement("div");
-    div.className = `leader-item ${item.isUser ? 'user-item' : ''}`;
-    div.innerHTML = `
-      <div class="leader-rank">${medal}</div>
-      ${avatarHtml}
-      <div class="leader-info">
-        <div class="leader-name">${item.name}</div>
-        <div class="leader-strength">Turf: ${item.size}</div>
-      </div>
-      <div class="leader-score">${item.score.toLocaleString()} XP</div>
-    `;
-    itemsContainer.appendChild(div);
-  });
-}
-
-// --- Interactive AI Coach Chat ---
-const COACH_RESPONSES = {
-  default: "I analyze your logs, consistency, and active streaks. Walking at this time keeps your metabolism active! What training recommendation do you need today?",
-  analyze: "📊 **Consistency Report**: You completed **3.5 km** today, matching your 7-day average. You captured 1 neutral zone and defended Home Base. Fatigue status is **Low**. Excellent rhythm!",
-  target: "🎯 **Tomorrow's Goal**: Let's challenge ourselves. Walk **2.5 km** at the Stanford Oval and complete a full loop to expand your territory boundaries. This will secure you +100 XP!",
-  fatigue: "🛡️ **Overtraining Check**: Your health consistency is at **82/100**. You completed workouts 4 days in a row. You are not overtraining, but I suggest focusing on short, low-intensity walks tomorrow to recover.",
-  streak: "🔥 **Streak Protection**: Maintain active logs daily (minimum 100m walks or captures) to secure your streak rewards. At day 10, you unlock a **Territory Shield** which slows down decay by 50%!"
-};
-
-function initCoachChat() {
-  const form = document.getElementById("coach-chat-form");
-  const input = document.getElementById("coach-message-input");
-  const chips = document.querySelectorAll(".prompt-chip");
-
-  form.addEventListener("submit", (e) => {
-    e.preventDefault();
-    const txt = input.value.trim();
-    if (!txt) return;
-
-    addUserBubble(txt);
-    input.value = "";
-
-    setTimeout(() => {
-      let reply = COACH_RESPONSES.default;
-      const lower = txt.toLowerCase();
-      if (lower.includes("analyze") || lower.includes("performance") || lower.includes("workout")) reply = COACH_RESPONSES.analyze;
-      else if (lower.includes("goal") || lower.includes("suggest") || lower.includes("tomorrow")) reply = COACH_RESPONSES.target;
-      else if (lower.includes("overtrain") || lower.includes("fatigue") || lower.includes("recovery")) reply = COACH_RESPONSES.fatigue;
-      else if (lower.includes("streak") || lower.includes("protection") || lower.includes("shield")) reply = COACH_RESPONSES.streak;
-
-      addCoachBubble(reply);
-    }, 800);
-  });
-
-  chips.forEach(chip => {
-    chip.addEventListener("click", () => {
-      sounds.playClick();
-      const prompt = chip.dataset.prompt;
-      addUserBubble(prompt);
-
-      setTimeout(() => {
-        let reply = COACH_RESPONSES.default;
-        if (prompt.includes("consistency")) reply = COACH_RESPONSES.analyze;
-        else if (prompt.includes("target")) reply = COACH_RESPONSES.target;
-        else if (prompt.includes("overtraining")) reply = COACH_RESPONSES.fatigue;
-        else if (prompt.includes("protection")) reply = COACH_RESPONSES.streak;
-
-        addCoachBubble(reply);
-      }, 700);
-    });
-  });
-}
-
-function addUserBubble(text) {
-  const viewport = document.getElementById("chat-messages");
-  const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  const div = document.createElement("div");
-  div.className = "chat-bubble user";
-  div.innerHTML = `
-    <div class="bubble-content">${text}</div>
-    <span class="bubble-time">${time}</span>
-  `;
-  viewport.appendChild(div);
-  viewport.scrollTop = viewport.scrollHeight;
-}
-
-function addCoachBubble(text) {
-  const viewport = document.getElementById("chat-messages");
-  const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  
-  const parsedText = text
-    .replace(/\*\*(.*?)\*\"/g, '<b>$1</b>')
-    .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
-    .replace(/📊|🎯|🛡️|🔥/g, (match) => `<span style="font-size: 1.1em">${match}</span>`);
-
-  const div = document.createElement("div");
-  div.className = "chat-bubble coach";
-  div.innerHTML = `
-    <div class="bubble-content">${parsedText}</div>
-    <span class="bubble-time">${time}</span>
-  `;
-  viewport.appendChild(div);
-  viewport.scrollTop = viewport.scrollHeight;
-}
-
-// --- Notifications & Toasts (Territory Guardian) ---
-function initNotificationSimulator() {
-  const triggerBtn = document.getElementById("notif-trigger-btn");
-  const closeBtn = document.getElementById("notif-close-btn");
-  
-  triggerBtn.addEventListener("click", () => {
-    sounds.playClick();
-    const notifications = [
-      "🏞️ Your territory misses you. A quick walk will keep it strong.",
-      "🛡️ Your territory has lost 15% strength today. Time to defend it!",
-      "🔥 You are on a 7-day streak. Keep it alive today!",
-      "🏃 Only 500 steps left to complete today's walking challenge.",
-      "👑 Opponent Alpha Runner is catching up. Secure your border now!"
-    ];
-
-    const randomNotif = notifications[Math.floor(Math.random() * notifications.length)];
-    showGuardianNotification("🛡️ Territory Guardian", randomNotif);
-  });
-
-  closeBtn.addEventListener("click", () => {
-    document.getElementById("notification-banner").classList.add("hidden");
-  });
-}
-
-function showGuardianNotification(title, text) {
-  const banner = document.getElementById("notification-banner");
-  banner.querySelector(".notif-title").innerText = title;
-  banner.querySelector(".notif-body").innerText = text;
-  
-  banner.classList.remove("hidden");
-  sounds.playTone(440, 'sine', 0.25);
-
-  setTimeout(() => {
-    banner.classList.add("hidden");
-  }, 6000);
-}
-
-function showToast(title, body) {
-  showGuardianNotification(title, body);
-}
-
-// --- Territory Decay Simulation Logic ---
-function fastForwardTime(days) {
-  sounds.playClick();
-  
-  let userTerritories = appState.territories.filter(t => t.owner === 'user');
-  if (userTerritories.length === 0) {
-    showToast("⚠️ No Territories", "You do not own any territories to decay!");
-    return;
   }
 
-  let warningAlertTriggered = false;
-  let lostAlertTriggered = false;
-
-  userTerritories.forEach(terr => {
-    // 15% decay per day Skips
-    const decayAmount = days * 15;
-    const oldStrength = terr.strength;
-    terr.strength = Math.max(0, terr.strength - decayAmount);
-
-    if (terr.strength === 0 && oldStrength > 0) {
-      terr.owner = 'neutral'; // Reverted to neutral
-      const lostArea = terr.area || 12000;
-      appState.user.totalCapturedArea = Math.max(0, appState.user.totalCapturedArea - lostArea);
-      lostAlertTriggered = true;
-      showToast("❌ Territory Lost!", `"${terr.name}" decayed to 0% and was lost to neutral space!`);
-    } else if (terr.strength <= 30 && oldStrength > 30) {
-      warningAlertTriggered = true;
-    }
-  });
-
-  if (lostAlertTriggered) {
-    sounds.playAlert();
-  } else if (warningAlertTriggered) {
-    sounds.playTone(200, 'sawtooth', 0.4);
-    showGuardianNotification("🛡️ Critical Decay Alert!", "One or more territories are below 30% strength! Revisit them to defend.");
-  } else {
-    showToast("⏳ Time Skips Forward", `Fast-forwarded ${days} day(s). Territories lost strength.`);
+  /* ── HEADER ── */
+  function updateHeader() {
+    const u = GameData.getUser();
+    if (!u) return;
+    el('topName').textContent = u.name;
+    el('topAvatar').textContent = u.emoji || '🏃';
+    el('topLevel').textContent = `Level ${u.level} · ${getLevelTitle(u.level)}`;
+    el('streakNum').textContent = u.streak || 0;
+    el('topXP').textContent = `${u.xp} XP`;
+    el('xpBarFill').style.width = `${Math.min((u.xp / u.xpNext) * 100, 100)}%`;
+    el('xpBarNums').textContent = `${u.xp} / ${u.xpNext} XP`;
+    if (el('levelFrom')) el('levelFrom').textContent = `Level ${u.level}`;
+    if (el('levelTo'))   el('levelTo').textContent = `Level ${u.level+1}`;
+    el('healthScore').textContent = u.healthScore || 80;
+    el('todayDist').innerHTML = `${((u.totalDist||0)/1000).toFixed(1)}<span style="font-size:0.6em">km</span>`;
+    const terrs = GameData.getTerritories();
+    const avgStr = terrs.length ? Math.round(terrs.reduce((s,t) => s+t.strength,0)/terrs.length) : 0;
+    el('terrStrength').innerHTML = `${avgStr}<span style="font-size:0.6em">%</span>`;
   }
 
-  saveState();
-  renderTerritories();
-  syncStatsUI();
-}
+  function getLevelTitle(lvl) {
+    const titles = ['','Newcomer','Explorer','Trailblazer','Conqueror','Legend','Supreme'];
+    return titles[Math.min(lvl, titles.length-1)] || 'Legend';
+  }
 
-function renderDecayDashboard() {
-  // Helper to build decay cards into a given container+badge pair
-  function renderIntoContainer(containerId, badgeId) {
-    const container = document.getElementById(containerId);
+  function setGreeting() {
+    const u = GameData.getUser();
+    const hour = new Date().getHours();
+    let greet = 'Good Morning';
+    if (hour >= 12 && hour < 17) greet = 'Good Afternoon';
+    else if (hour >= 17) greet = 'Good Evening';
+    if (el('greetMsg')) el('greetMsg').textContent = `${greet}, ${u?.name || 'Runner'}! 👋`;
+  }
+
+  /* ── HOME ── */
+  function renderHome() {
+    updateHeader();
+    setGreeting();
+    renderHomeQuests();
+  }
+
+  function renderHomeQuests() {
+    const container = el('homeQuestList');
     if (!container) return;
-    container.innerHTML = "";
+    container.innerHTML = '';
+    DAILY_QUESTS.slice(0,3).forEach(q => container.appendChild(buildQuestCard(q)));
+  }
 
-    const userTerritories = appState.territories.filter(t => t.owner === 'user');
-
-    const badge = document.getElementById(badgeId);
-    if (badge) badge.innerText = `${userTerritories.length} Active`;
-
-    if (userTerritories.length === 0) {
-      container.innerHTML = `
-        <div style="text-align:center; padding:24px 16px; font-size:13px; color:var(--text-muted);">
-          <div style="font-size:2rem; margin-bottom:8px;">🗺️</div>
-          No territories yet — go capture some on the map!
+  function buildQuestCard(q) {
+    const div = document.createElement('div');
+    div.className = `quest-card ${q.progress >= 100 ? 'done' : ''}`;
+    div.innerHTML = `
+      <div class="quest-top">
+        <div class="quest-left">
+          <span class="quest-icon">${q.icon}</span>
+          <div>
+            <div class="quest-name">${q.progress>=100?'✅ ':''}${q.name}</div>
+            <div class="quest-sub">${q.sub}</div>
+          </div>
         </div>
-      `;
+        <span class="quest-xp">+${q.xp} XP</span>
+      </div>
+      <div class="quest-bar-track">
+        <div class="quest-bar-fill ${q.color}" style="width:0%" data-target="${q.progress}"></div>
+      </div>
+      <div class="quest-progress-label">${q.progress}% complete</div>
+    `;
+    setTimeout(() => {
+      const fill = div.querySelector('.quest-bar-fill');
+      if (fill) fill.style.width = fill.dataset.target + '%';
+    }, 100);
+    return div;
+  }
+
+  /* ── MAP UI ── */
+  function renderMapUI() {
+    // Show/hide panels based on mode
+    setMode(state.mode);
+    // Load GM key into input
+    MapEngine.loadSavedGMKey();
+  }
+
+  function startActivity() {
+    navigate('map');
+    showToast('📍 Map opened — press Start Capture to begin!');
+  }
+
+  /* ── MODE & SPEED ── */
+  function setMode(mode) {
+    state.mode = mode;
+    el('modeSimBtn').classList.toggle('active', mode === 'sim');
+    el('modeGpsBtn').classList.toggle('active', mode === 'gps');
+    el('dpadContainer').classList.toggle('hidden', mode === 'gps');
+    el('speedPills').style.display = mode === 'gps' ? 'none' : 'flex';
+
+    const gpsPanel = el('gpsStatusPanel');
+    if (gpsPanel) gpsPanel.classList.toggle('hidden', mode === 'sim');
+
+    if (mode === 'gps') {
+      // Show permission overlay if GPS not yet active
+      if (GPS.getState() === 'idle' || GPS.getState() === 'error') {
+        el('gpsOverlay').classList.remove('hidden');
+      } else {
+        GPS.startWatch();
+        showToast('📡 GPS mode active — walk to capture territory!');
+      }
+    } else {
+      el('gpsOverlay').classList.add('hidden');
+      el('gpsBadge').classList.add('hidden');
+      showToast('🎮 Simulation mode — use D-Pad to move!');
+    }
+  }
+
+  function setSpeed(speed) {
+    state.speedMode = speed;
+    document.querySelectorAll('.speed-pill').forEach(b => b.classList.remove('active'));
+    const ids = { walk:'spWalk', jog:'spJog', run:'spRun' };
+    if (ids[speed]) el(ids[speed]).classList.add('active');
+    const kmh = { walk:'4.7 km/h', jog:'10.8 km/h', run:'19.8 km/h' };
+    showToast(`${speed==='walk'?'🚶':speed==='jog'?'🏃':'⚡'} Speed: ${kmh[speed]}`);
+  }
+
+  function getSimSpeed() {
+    return { walk:1.4, jog:3.0, run:5.5 }[state.speedMode] || 1.4; // m/s
+  }
+
+  /* ── SESSION ── */
+  function startSession() {
+    if (state.session.active) return;
+    state.session.active = true;
+    state.session.paused = false;
+    state.session.distance = 0;
+    state.session.time = 0;
+    state.session.startTime = Date.now();
+    state.sessionTrailPoints = [];
+    MapEngine.clearTrail();
+
+    // Add start point
+    if (state.mode === 'sim') {
+      const c = MapEngine.getCenter();
+      state.simPos = { lat: c.lat, lng: c.lng };
+      state.sessionTrailPoints.push([c.lat, c.lng]);
+      MapEngine.addTrailPoint(c.lat, c.lng);
+    } else if (GPS.getLastPos()) {
+      const p = GPS.getLastPos().coords;
+      state.sessionTrailPoints.push([p.latitude, p.longitude]);
+    }
+
+    el('startBtn').classList.add('hidden');
+    el('stopBtn').classList.remove('hidden');
+    el('pauseBtn').classList.remove('hidden');
+
+    clearInterval(_sessionTimer);
+    _sessionTimer = setInterval(() => {
+      if (!state.session.paused) {
+        state.session.time++;
+        updateHUD();
+      }
+    }, 1000);
+
+    showToast('🎯 Capture session started! Move to claim territory!');
+  }
+
+  function stopSession() {
+    if (!state.session.active) return;
+    clearInterval(_sessionTimer);
+    state.session.active = false;
+    state.session.paused = false;
+
+    el('stopBtn').classList.add('hidden');
+    el('pauseBtn').classList.add('hidden');
+    el('startBtn').classList.remove('hidden');
+
+    // Stop GPS watch
+    if (state.mode === 'gps') GPS.stopWatch();
+
+    // Get all trail points
+    const trail = state.mode === 'sim'
+      ? state.sessionTrailPoints
+      : MapEngine.getTrailPoints();
+
+    const dist = state.session.distance;
+    const km = parseFloat((dist / 1000).toFixed(2));
+
+    if (trail.length >= 3) {
+      // Compute territory polygon
+      const hull = expandHull(convexHull(trail));
+      const area = Math.round(polygonArea(hull));
+
+      // Draw on map
+      MapEngine.drawTerritoryPolygon(trail, '#10B981', 'Your New Territory');
+
+      // Save territory
+      const territory = {
+        id: Date.now(),
+        name: getRandomZoneName(),
+        emoji: '🗺️',
+        area,
+        strength: 100,
+        status: 'safe',
+        hull,
+        capturedAt: Date.now(),
+        distKm: km,
+        isGPS: state.mode === 'gps',
+      };
+      GameData.addTerritory(territory);
+
+      // XP earned
+      const xpEarned = Math.round(km * 60 + area / 50 + 20);
+      awardXP(xpEarned);
+
+      el('captureDetails').textContent = `${territory.name} — ${area.toLocaleString()} m² captured! +${xpEarned} XP`;
+      el('captureXP').textContent = `+${xpEarned} XP`;
+      showModal('captureModal');
+
+    } else if (dist > 50) {
+      const xpEarned = Math.round(km * 40 + 10);
+      awardXP(xpEarned);
+      showToast(`✅ Session ended! +${xpEarned} XP earned. Walk more to capture territory!`);
+    } else {
+      showToast('Session ended. Walk or move more to capture territory!');
+    }
+
+    // Update stats
+    GameData.updateUser({
+      totalDist: (GameData.getUser()?.totalDist || 0) + dist,
+      sessions:  (GameData.getUser()?.sessions  || 0) + 1,
+    });
+
+    resetHUD();
+    updateHeader();
+  }
+
+  function pauseSession() {
+    state.session.paused = !state.session.paused;
+    el('pauseBtn').innerHTML = state.session.paused
+      ? '<i class="fa-solid fa-play"></i> Resume'
+      : '<i class="fa-solid fa-pause"></i> Pause';
+    showToast(state.session.paused ? '⏸ Session paused' : '▶️ Session resumed!');
+  }
+
+  function awardXP(amount) {
+    const u = GameData.getUser();
+    if (!u) return;
+    let xp = (u.xp || 0) + amount;
+    let level = u.level || 1;
+    let xpNext = u.xpNext || 500;
+    if (xp >= xpNext) {
+      xp -= xpNext;
+      level++;
+      xpNext = Math.round(xpNext * 1.25);
+      setTimeout(() => {
+        el('modalBadge').textContent = `Level ${level}`;
+        showModal('levelModal');
+      }, 2000);
+    }
+    GameData.updateUser({ xp, level, xpNext });
+    updateHeader();
+  }
+
+  function getRandomZoneName() {
+    const names = ['Riverside District','City Heights','West Quarter','Harbor Zone','Summit Point','Park District','Market Square','Old Town','Innovation Hub','East End'];
+    return names[Math.floor(Math.random() * names.length)];
+  }
+
+  function resetHUD() {
+    el('hudDist').textContent = '0.00';
+    el('hudTime').textContent = '00:00';
+    el('hudSpeed').textContent = '0.0';
+    el('hudArea').textContent = '0';
+  }
+
+  function updateHUD() {
+    const s = state.session;
+    const km = (s.distance / 1000).toFixed(2);
+    const mins = String(Math.floor(s.time / 60)).padStart(2,'0');
+    const secs = String(s.time % 60).padStart(2,'0');
+    const speed = s.distance > 0 && s.time > 0
+      ? ((s.distance/1000)/(s.time/3600)).toFixed(1) : '0.0';
+    const area = state.sessionTrailPoints.length >= 3
+      ? Math.round(polygonArea(expandHull(convexHull(state.sessionTrailPoints)))) : 0;
+    el('hudDist').textContent = km;
+    el('hudTime').textContent = `${mins}:${secs}`;
+    el('hudSpeed').textContent = speed;
+    el('hudArea').textContent = area;
+  }
+
+  /* ── GPS CALLBACKS ── */
+  function _onGPSUpdate(lat, lng, accuracy, speed) {
+    if (!state.session.active || state.session.paused) return;
+    const trail = state.sessionTrailPoints;
+    if (trail.length > 0) {
+      const [lastLat, lastLng] = trail[trail.length-1];
+      const dist = haversine(lastLat, lastLng, lat, lng);
+      if (dist > 3) { // only add if moved more than 3 meters
+        trail.push([lat, lng]);
+        MapEngine.addTrailPoint(lat, lng);
+        state.session.distance += dist;
+      }
+    } else {
+      trail.push([lat, lng]);
+      MapEngine.addTrailPoint(lat, lng);
+    }
+
+    // Update GPS status
+    const coordsEl = el('gpsCoords');
+    if (coordsEl) coordsEl.textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+    if (el('gpsAccText')) el('gpsAccText').textContent = `GPS: ±${Math.round(accuracy||0)}m`;
+  }
+
+  /* ── SIM MOVEMENT ── */
+  function _onSimMove(lat, lng) {
+    if (!state.session.active || state.session.paused) return;
+    const trail = state.sessionTrailPoints;
+    if (trail.length > 0) {
+      const [lastLat, lastLng] = trail[trail.length-1];
+      const dist = haversine(lastLat, lastLng, lat, lng);
+      trail.push([lat, lng]);
+      MapEngine.addTrailPoint(lat, lng);
+      state.session.distance += dist;
+    } else {
+      trail.push([lat, lng]);
+    }
+    state.simPos = { lat, lng };
+  }
+
+  /* ── D-PAD ── */
+  function dpadStart(dir) {
+    if (state.dpad.interval) clearInterval(state.dpad.interval);
+    doSimMove(dir);
+    state.dpad.interval = setInterval(() => doSimMove(dir), 80);
+  }
+
+  function dpadStop() {
+    clearInterval(state.dpad.interval);
+    state.dpad.interval = null;
+  }
+
+  function doSimMove(dir) {
+    const step = getSimSpeed() * 0.00001;
+    const moves = { N:[step,0], S:[-step,0], E:[0,step*1.5], W:[0,-step*1.5] };
+    const [dLat, dLng] = moves[dir] || [0,0];
+    MapEngine.movePlayerSim(dLat, dLng);
+  }
+
+  function centerMap() {
+    const lastPos = GPS.getLastPos();
+    if (lastPos) {
+      MapEngine.flyTo(lastPos.coords.latitude, lastPos.coords.longitude, 16);
+    } else {
+      MapEngine.flyTo(state.simPos.lat, state.simPos.lng, 16);
+    }
+  }
+
+  /* ── DEFENSE ── */
+  function renderDefense() {
+    const terrs = GameData.getTerritories();
+    renderDecayPills(terrs);
+    renderTerritoryList(terrs);
+  }
+
+  function renderDecayPills(terrs) {
+    const c = el('decayPillsRow');
+    if (!c) return;
+    c.innerHTML = '';
+    const total = terrs.length;
+    const safe = terrs.filter(t => t.strength >= 60).length;
+    const danger = terrs.filter(t => t.strength < 40).length;
+    const avg = total ? Math.round(terrs.reduce((s,t) => s+t.strength,0)/total) : 0;
+    const pills = [
+      { val:total,  lbl:'Zones',    color:'var(--blue)' },
+      { val:safe,   lbl:'Safe',     color:'var(--primary)' },
+      { val:danger, lbl:'Critical', color:'var(--red)' },
+      { val:`${avg}%`, lbl:'Avg Str', color:'var(--orange)' },
+    ];
+    pills.forEach(p => {
+      const div = document.createElement('div');
+      div.className = 'decay-pill';
+      div.innerHTML = `<div class="dp-val" style="color:${p.color}">${p.val}</div><div class="dp-lbl">${p.lbl}</div>`;
+      c.appendChild(div);
+    });
+  }
+
+  function renderTerritoryList(terrs) {
+    const c = el('territoryList');
+    if (!c) return;
+    c.innerHTML = '';
+    if (el('terrCount')) el('terrCount').textContent = `${terrs.length} Active`;
+
+    if (!terrs.length) {
+      c.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:32px 0">No territories yet.<br>Go for a walk to capture your first zone! 🗺️</p>';
       return;
     }
 
-    userTerritories.forEach(terr => {
-      let healthClass = "healthy";
-      let pctClass = "healthy";
-      let icon = "🟢";
-
-      if (terr.strength <= 15) {
-        healthClass = "critical";
-        pctClass = "critical";
-        icon = "🚨";
-      } else if (terr.strength <= 44) {
-        healthClass = "fading";
-        pctClass = "fading";
-        icon = "⚠️";
-      } else if (terr.strength <= 74) {
-        healthClass = "stable";
-        pctClass = "stable";
-        icon = "🟡";
-      }
-
-      const card = document.createElement("div");
-      card.className = `decay-card ${terr.strength <= 15 ? 'danger-state' : ''}`;
-      card.innerHTML = `
-        <div class="decay-icon">${icon}</div>
-        <div class="decay-info-block">
-          <div class="decay-row-top">
-            <span class="decay-card-title">${terr.name}</span>
-            <span class="decay-pct ${pctClass}">${terr.strength}%</span>
+    terrs.forEach((t, i) => {
+      const status = t.strength < 40 ? 'danger' : t.strength < 60 ? 'warning' : '';
+      const barColor = t.strength >= 60
+        ? 'linear-gradient(90deg,#10B981,#34D399)'
+        : t.strength >= 40
+          ? 'linear-gradient(90deg,#F59E0B,#FBBF24)'
+          : 'linear-gradient(90deg,#EF4444,#F87171)';
+      const strColor = t.strength >= 60 ? 'var(--primary)' : t.strength >= 40 ? 'var(--orange)' : 'var(--red)';
+      const div = document.createElement('div');
+      div.className = `territory-card ${status}`;
+      div.innerHTML = `
+        <div class="terr-row">
+          <div>
+            <div class="terr-name">${t.emoji} ${t.name}</div>
+            <div class="terr-area">${(t.area||0).toLocaleString()} m² &nbsp;
+              <span class="terr-badge ${t.isGPS?'gps':'sim'}">${t.isGPS?'📡 GPS':'🎮 Sim'}</span>
+            </div>
           </div>
-          <div class="decay-area-label">${(terr.area || 12000).toLocaleString()} m²</div>
-          <div class="decay-progress-track">
-            <div class="decay-progress-bar ${healthClass}" style="width: ${terr.strength}%"></div>
-          </div>
+          <div class="terr-strength-val" style="color:${strColor}">${t.strength}%</div>
         </div>
-        <button class="btn btn-outline decay-defend-btn" onclick="revisitTerritory('${terr.id}')">
-          🛡️ Defend
-        </button>
+        <div class="terr-bar-track">
+          <div class="terr-bar-fill" style="width:0%;background:${barColor}" data-target="${t.strength}"></div>
+        </div>
+        <div class="terr-actions" style="margin-top:10px">
+          <button class="terr-btn primary" onclick="App.defendTerritory(${i})">🛡️ Defend</button>
+          <button class="terr-btn secondary" onclick="App.viewTerritory(${i})">📍 View on Map</button>
+        </div>
       `;
-      container.appendChild(card);
+      c.appendChild(div);
+      setTimeout(() => {
+        const fill = div.querySelector('.terr-bar-fill');
+        if (fill) fill.style.width = fill.dataset.target + '%';
+      }, 100);
     });
   }
 
-  // Render into the Defense Center screen container
-  renderIntoContainer("decay-list-container", "decay-count-badge");
+  function defendTerritory(i) {
+    const terrs = GameData.getTerritories();
+    if (!terrs[i]) return;
+    terrs[i].strength = Math.min(100, terrs[i].strength + 25);
+    GameData.saveTerritories(terrs);
+    showToast(`🛡️ ${terrs[i].name} defended! Strength +25%`);
+    renderDefense();
+  }
 
-  // Render into the Decay Watch screen container
-  renderIntoContainer("decay-list-container-2", "decay-count-badge-2");
-
-  // Update summary stat pills on the Decay Watch screen
-  const userTerrs = appState.territories.filter(t => t.owner === 'user');
-  const healthy  = userTerrs.filter(t => t.strength > 74).length;
-  const fading   = userTerrs.filter(t => t.strength > 15 && t.strength <= 74).length;
-  const critical = userTerrs.filter(t => t.strength <= 15).length;
-
-  const totalEl    = document.getElementById("decay-total-count");
-  const healthyEl  = document.getElementById("decay-healthy-count");
-  const fadingEl   = document.getElementById("decay-fading-count");
-  const criticalEl = document.getElementById("decay-critical-count");
-
-  if (totalEl)    totalEl.innerText    = userTerrs.length;
-  if (healthyEl)  healthyEl.innerText  = healthy;
-  if (fadingEl)   fadingEl.innerText   = fading;
-  if (criticalEl) criticalEl.innerText = critical;
-}
-
-
-function renderZarssTable() {
-  const container = document.getElementById("dashboard-table-list");
-  if (!container) return;
-  container.innerHTML = "";
-
-  // Combine user territories + mock competitor items to create a rich log history
-  const userTerritories = appState.territories.filter(t => t.owner === 'user');
-  
-  const items = [];
-
-  // 1. User territories
-  userTerritories.forEach(terr => {
-    let chipClass = "completed";
-    let chipText = "Healthy";
-    if (terr.strength < 45) {
-      chipClass = "fading";
-      chipText = "Fading";
+  function viewTerritory(i) {
+    navigate('map');
+    const terrs = GameData.getTerritories();
+    const t = terrs[i];
+    if (t?.hull?.length) {
+      setTimeout(() => MapEngine.flyTo(t.hull[0][0], t.hull[0][1], 16), 300);
     }
-    
-    let avatarContent = appState.user.avatar;
-    let avatarStyle = "";
-    if (appState.user.avatarImage) {
-      avatarStyle = `background-image: url(${appState.user.avatarImage});`;
-      avatarContent = "";
-    }
+  }
 
-    items.push({
-      name: `You (${terr.name})`,
-      value: `${(terr.area || 12000).toLocaleString()} m²`,
-      chipClass: chipClass,
-      chipText: chipText,
-      avatarContent: avatarContent,
-      avatarStyle: avatarStyle,
-      timestamp: Date.now() - (terr.strength < 45 ? 86400000 : 3600000) // dynamic dates
+  function fastForward(days) {
+    const terrs = GameData.getTerritories();
+    terrs.forEach(t => {
+      t.strength = Math.max(5, t.strength - days * 10);
+      if (t.strength < 40) t.status = 'danger';
+      else if (t.strength < 60) t.status = 'warning';
+      else t.status = 'safe';
     });
-  });
+    GameData.saveTerritories(terrs);
+    showToast(`⏩ Fast-forwarded ${days} day${days>1?'s':''}! Territory decayed.`);
+    renderDefense();
+  }
 
-  // 2. Competitors mock logs matching the mockup
-  items.push({
-    name: "David Astee (AI)",
-    value: "14,560 m²",
-    chipClass: "chargeback",
-    chipText: "Captured",
-    avatarContent: "🦁",
-    avatarStyle: "",
-    timestamp: Date.now() - 7200000
-  });
+  /* ── CHALLENGES ── */
+  function renderChallenges() {
+    const c = el('challengeList');
+    if (!c) return;
+    c.innerHTML = '';
+    const quests = state.quests.tab === 'daily' ? DAILY_QUESTS : WEEKLY_QUESTS;
+    quests.forEach(q => c.appendChild(buildQuestCard(q)));
+    renderBadges();
+  }
 
-  items.push({
-    name: "Maria Hulama (AI)",
-    value: "42,430 m²",
-    chipClass: "completed",
-    chipText: "Healthy",
-    avatarContent: "🦉",
-    avatarStyle: "",
-    timestamp: Date.now() - 14400000
-  });
+  function setQuestTab(tab) {
+    state.quests.tab = tab;
+    el('tabDaily').classList.toggle('active', tab==='daily');
+    el('tabWeekly').classList.toggle('active', tab==='weekly');
+    renderChallenges();
+  }
 
-  items.push({
-    name: "Arnold Swarz (AI)",
-    value: "3,412 m²",
-    chipClass: "completed",
-    chipText: "Healthy",
-    avatarContent: "⚡",
-    avatarStyle: "",
-    timestamp: Date.now() - 28800000
-  });
+  function renderBadges() {
+    const u = GameData.getUser();
+    const b = [...BADGES];
+    if (u) {
+      if (u.sessions >= 1) b[0].unlocked = true;
+      if (u.streak >= 7)   b[1].unlocked = true;
+      if ((u.totalArea||0) > 10000) b[2].unlocked = true;
+    }
+    const c = el('badgesGrid');
+    if (!c) return;
+    c.innerHTML = '';
+    b.forEach(badge => {
+      const div = document.createElement('div');
+      div.className = `badge-item ${badge.unlocked?'':'locked'}`;
+      div.innerHTML = `<div class="badge-em">${badge.em}</div><div class="badge-name">${badge.name}</div>`;
+      c.appendChild(div);
+    });
+  }
 
-  // Sort logs by timestamp desc
-  items.sort((a, b) => b.timestamp - a.timestamp);
+  /* ── LEADERBOARD ── */
+  function renderLeaderboard() {
+    const data = LEADERBOARD[state.leader.tab];
+    renderPodium(data);
+    renderLeaderList(data);
+  }
 
-  // Render logs
-  items.forEach(item => {
-    const row = document.createElement("div");
-    row.className = "zarss-table-row";
-    
-    // Format date in Zarss mockup format: "11 Sep 2022" or active date
-    const dateObj = new Date(item.timestamp);
-    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    const dateStr = `${dateObj.getDate()} ${months[dateObj.getMonth()]} ${dateObj.getFullYear()}`;
+  function setLeaderTab(tab) {
+    state.leader.tab = tab;
+    document.querySelectorAll('#screen-leaderboard .tab-pill').forEach((b,i) => {
+      b.classList.toggle('active', (i===0 && tab==='local') || (i===1 && tab==='global'));
+    });
+    renderLeaderboard();
+  }
 
-    row.innerHTML = `
-      <div class="ztr-left">
-        <div class="ztr-avatar" style="${item.avatarStyle}">${item.avatarContent}</div>
-        <div class="ztr-info">
-          <span class="ztr-name">${item.name}</span>
+  function renderPodium(data) {
+    const top3 = data.slice(0,3);
+    const order = [top3[1], top3[0], top3[2]].filter(Boolean);
+    const ranks = [2,1,3];
+    const crowns = ['🥈','🥇','🥉'];
+    const c = el('podium');
+    if (!c) return;
+    c.innerHTML = '';
+    order.forEach((p, idx) => {
+      const rank = ranks[idx];
+      const div = document.createElement('div');
+      div.className = `podium-item rank-${rank}`;
+      div.innerHTML = `
+        <div class="podium-crown">${crowns[idx]}</div>
+        <div class="podium-avatar">${p.emoji}</div>
+        <div class="podium-name">${p.name}${p.you?' (You)':''}</div>
+        <div class="podium-xp">${p.xp} XP</div>
+        <div class="podium-platform">${rank}</div>
+      `;
+      c.appendChild(div);
+    });
+  }
+
+  function renderLeaderList(data) {
+    const c = el('leaderList');
+    if (!c) return;
+    c.innerHTML = '';
+    const rankColors = {1:'#FBBF24',2:'#CBD5E1',3:'#D97706'};
+    data.forEach(p => {
+      const div = document.createElement('div');
+      div.className = `leader-item ${p.you?'you':''}`;
+      div.innerHTML = `
+        <div class="leader-rank" style="color:${rankColors[p.rank]||'var(--text-muted)'}">${p.rank}</div>
+        <div class="leader-avatar">${p.emoji}</div>
+        <div class="leader-info">
+          <div class="leader-name">${p.name}${p.you?' 👈 You':''}</div>
+          <div class="leader-sub">${p.area} captured</div>
         </div>
-      </div>
-      <div class="ztr-value">${item.value}</div>
-      <div class="ztr-right">
-        <span class="ztr-chip ${item.chipClass}">${item.chipText}</span>
-        <span class="ztr-date">${dateStr}</span>
-      </div>
-    `;
-    container.appendChild(row);
-  });
-}
-
-function initZarssChart() {
-  const chartColumns = document.querySelectorAll(".zarss-bar-graph .chart-col-track");
-  
-  // Weekly default mock area values (matching Wednesday's $33,567 / 33.5k m²)
-  const dailyValues = {
-    mon: { pct: 40, val: "16,240 m²" },
-    tue: { pct: 65, val: "24,575 m²" },
-    wed: { pct: 82, val: "33,567 m²" },
-    thu: { pct: 30, val: "10,120 m²" },
-    fri: { pct: 55, val: "18,450 m²" },
-    sat: { pct: 75, val: "29,800 m²" },
-    sun: { pct: 15, val: "0 m²" } // Will be updated dynamically for Sunday/today
-  };
-
-  // Initialize bar heights
-  chartColumns.forEach(col => {
-    const barFill = col.querySelector(".chart-bar-fill");
-    const container = col.querySelector(".chart-bar-container");
-    const dayLabel = col.querySelector(".chart-day-label").innerText.toLowerCase();
-    
-    // Add tooltip element if not present
-    let tooltip = container.querySelector(".chart-tooltip-bubble");
-    if (!tooltip) {
-      tooltip = document.createElement("div");
-      tooltip.className = "chart-tooltip-bubble";
-      container.appendChild(tooltip);
-    }
-
-    // Set values based on day
-    let pct = dailyValues[dayLabel]?.pct || 0;
-    let val = dailyValues[dayLabel]?.val || "0 m²";
-
-    if (dayLabel === "sun") {
-      // sun is today/live
-      pct = Math.min(100, appState.user.healthScore);
-      val = `${appState.user.totalCapturedArea.toLocaleString()} m²`;
-    }
-
-    tooltip.innerText = val;
-    barFill.style.height = `${pct}%`;
-
-    // Click handler to select and slide tooltip
-    col.addEventListener("click", () => {
-      sounds.playClick();
-      
-      // Remove active-day class from all containers
-      document.querySelectorAll(".zarss-bar-graph .chart-bar-container").forEach(c => {
-        c.classList.remove("active-day");
-      });
-      
-      // Add to this one
-      container.classList.add("active-day");
+        <div class="leader-xp">${p.xp} XP</div>
+      `;
+      c.appendChild(div);
     });
-  });
-}
-
-function initTimeMachine() {
-  // Defense Center buttons
-  document.getElementById("tm-add-1d").addEventListener("click", () => fastForwardTime(1));
-  document.getElementById("tm-add-3d").addEventListener("click", () => fastForwardTime(3));
-  document.getElementById("tm-add-7d").addEventListener("click", () => fastForwardTime(7));
-  // Decay Watch screen buttons
-  document.getElementById("tm2-add-1d").addEventListener("click", () => fastForwardTime(1));
-  document.getElementById("tm2-add-3d").addEventListener("click", () => fastForwardTime(3));
-  document.getElementById("tm2-add-7d").addEventListener("click", () => fastForwardTime(7));
-}
-
-// --- Interface Synchronizer ---
-function syncStatsUI() {
-  const user = appState.user;
-  
-  // Name updates
-  document.getElementById("header-username").innerText = user.username;
-  document.getElementById("welcome-name").innerText = user.username;
-  
-  const sidebarUsername = document.getElementById("sidebar-username-txt");
-  if (sidebarUsername) {
-    sidebarUsername.innerText = user.username;
-  }
-  
-  const nameBox = document.getElementById("profile-username-textbox");
-  if (nameBox) {
-    nameBox.value = user.username;
   }
 
-  // Set Profile Avatars and crop images
-  const headerAvatar = document.getElementById("header-avatar");
-  const profileAvatar = document.getElementById("profile-avatar-emoji");
-  const sidebarAvatar = document.getElementById("sidebar-avatar-img");
-  
-  if (user.avatarImage) {
-    headerAvatar.style.backgroundImage = `url(${user.avatarImage})`;
-    headerAvatar.classList.add("has-image");
-    
-    profileAvatar.style.backgroundImage = `url(${user.avatarImage})`;
-    profileAvatar.classList.add("has-image");
+  /* ── AI COACH ── */
+  const COACH_RULES = [
+    { kw:['streak','protect'],    reply:'🔥 To protect your streak, any 5+ min activity counts. Short walk > nothing. Consistency is the #1 predictor of fitness success!' },
+    { kw:['week','recap','doing'],reply:'📊 This week you\'re performing great! Based on your sessions, you\'ve covered good ground. Keep expanding your territory to dominate the local leaderboard.' },
+    { kw:['tomorrow','goal','plan'],reply:'🎯 Tomorrow\'s plan: Target a 20-30 minute walk/jog. Focus on areas you haven\'t captured yet. New territory = bonus XP multiplier!' },
+    { kw:['overtraining','tired','fatigue','rest'],reply:'😴 Rest is training! Your muscles grow during recovery. If you\'re tired, a slow 10-min walk still preserves your streak without overloading your body.' },
+    { kw:['territory','defend','zone'],reply:'🗺️ Territory strength decays ~10% per day without activity. A 5-minute jog through your zone resets it to 100%. Try the Defense tab to monitor all zones!' },
+    { kw:['gps','real','location','tracking'],reply:'📡 GPS tracking uses your device\'s location sensor. Make sure Location is enabled in browser settings. For best accuracy, keep your phone horizontal and outdoors.' },
+    { kw:['xp','level','points'],reply:'⚡ Earn XP by: capturing territory (+50-150 XP), running distance (+60 XP/km), and maintaining your streak (+30 XP/day). Level up for leaderboard rank boost!' },
+    { kw:['rival','compete','beat'],reply:'🏆 Check your local Leaderboard — you\'re close to overtaking rivals! A 2km capture session could leapfrog you past 2-3 players today.' },
+    { kw:['google','maps','api'],reply:'🗺️ To use Google Maps: go to Profile → Google Maps Setup. Get a free API key from Google Cloud Console. The app works perfectly on OpenStreetMap too!' },
+    { kw:['otp','register','login','account'],reply:'🔐 My Territory uses phone OTP for secure registration. Your account is stored locally on your device. Password protects daily login.' },
+  ];
 
-    if (sidebarAvatar) {
-      sidebarAvatar.style.backgroundImage = `url(${user.avatarImage})`;
-      sidebarAvatar.classList.add("has-image");
-      sidebarAvatar.innerText = "";
-    }
-  } else {
-    headerAvatar.style.backgroundImage = "none";
-    headerAvatar.classList.remove("has-image");
-    headerAvatar.innerText = user.avatar;
-    
-    profileAvatar.style.backgroundImage = "none";
-    profileAvatar.classList.remove("has-image");
-    profileAvatar.innerText = user.avatar;
-
-    if (sidebarAvatar) {
-      sidebarAvatar.style.backgroundImage = "none";
-      sidebarAvatar.classList.remove("has-image");
-      sidebarAvatar.innerText = user.avatar;
-    }
-  }
-
-  // Level markers
-  document.getElementById("header-level").innerText = user.level;
-  document.getElementById("header-streak").innerText = user.streak;
-  document.getElementById("header-xp-current").innerText = user.xp;
-  document.getElementById("header-xp-max").innerText = user.xpMax;
-  
-  const xpPercent = (user.xp / user.xpMax) * 100;
-  document.getElementById("header-xp-bar").style.width = `${xpPercent}%`;
-  
-  const rankTitle = getRankTitle(user.level);
-  document.getElementById("header-rank-title").innerText = rankTitle;
-
-  document.getElementById("dashboard-health-score").innerText = `${user.healthScore}/100`;
-  document.getElementById("dashboard-territory-size").innerText = `${user.totalCapturedArea.toLocaleString()} m²`;
-  
-  const healthRing = document.getElementById("health-ring-fill");
-  const offset = 251.2 - (251.2 * user.healthScore) / 100;
-  healthRing.style.strokeDashoffset = offset;
-
-  document.getElementById("stat-territory-size").innerText = `${user.totalCapturedArea.toLocaleString()} m²`;
-  
-  let avgStrength = 0;
-  let userTerritories = appState.territories.filter(t => t.owner === "user");
-  if (userTerritories.length > 0) {
-    const totalStrength = userTerritories.reduce((sum, curr) => sum + curr.strength, 0);
-    avgStrength = Math.round(totalStrength / userTerritories.length);
-  }
-  document.getElementById("stat-territory-strength").innerText = `${avgStrength}%`;
-  document.getElementById("stat-streak-val").innerText = `${user.streak} Days`;
-
-  // Profile Elements
-  document.getElementById("profile-level-badge").innerText = `Level ${user.level} ${rankTitle}`;
-  document.getElementById("profile-total-captured").innerText = `${user.totalCapturedArea.toLocaleString()} m²`;
-  document.getElementById("profile-max-streak").innerText = `${user.longestStreak} Days`;
-
-  const chartToday = document.getElementById("chart-today-bar");
-  if (chartToday) {
-    chartToday.style.height = `${user.healthScore}%`;
-  }
-  
-  // Redraw Territory decay dashboard list
-  renderDecayDashboard();
-  
-  // Redraw Zarss activity table feed
-  renderZarssTable();
-}
-
-// Customizable Profile actions
-function initProfileActions() {
-  const textbox = document.getElementById("profile-username-textbox");
-  const photoInput = document.getElementById("profile-photo-upload-input");
-
-  // Edit Username inline
-  textbox.addEventListener("input", (e) => {
-    const name = e.target.value.trim();
-    if (name) {
-      appState.user.username = name;
-      
-      // Update in leaderboard database
-      const userRank = appState.leaderboard.find(l => l.isUser);
-      if (userRank) userRank.name = name;
-
-      saveState();
-      
-      // Update UI displays (header, dashboard greetings)
-      document.getElementById("header-username").innerText = name;
-      document.getElementById("welcome-name").innerText = name;
-    }
-  });
-
-  // Custom Profile Image Upload
-  photoInput.addEventListener("change", (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      compressAndReadPhoto(file, (base64) => {
-        appState.user.avatarImage = base64;
-        
-        // Update user map marker and avatar circles
-        updateMapUserMarker();
-        saveState();
-        syncStatsUI();
-        renderLeaderboard();
-        
-        showToast("🖼️ Profile Updated", "Your new custom photo has been applied successfully!");
-      });
-    }
-  });
-
-  document.getElementById("btn-reset-data").addEventListener("click", () => {
-    if (confirm("Are you sure you want to reset all app progress and territories?")) {
-      sounds.playClick();
-      
-      // Wipe profile back to Level 1 Beginner (true clean slate)
-      appState.user = {
-        username: "",
-        level: 1,
-        xp: 0,
-        xpMax: 1000,
-        streak: 0,
-        healthScore: 0,
-        longestStreak: 0,
-        avatar: "🏃‍♂️",
-        avatarImage: "",
-        isLoggedIn: false,
-        totalCapturedArea: 0
-      };
-
-      // Wipe all user territories, keeping only the starting zones (neutral, AI rivals)
-      appState.territories = appState.territories.filter(t => t.owner !== 'user');
-      
-      // Reset all challenges/badges
-      appState.challenges.forEach(c => {
-        c.progress = 0;
-        c.completed = false;
-      });
-      appState.badges.forEach(b => {
-        b.unlocked = false;
-      });
-
-      saveState();
-      
-      // Force user back to authentication portal
-      document.getElementById("main-app").classList.add("hidden");
-      document.getElementById("auth-screen").classList.remove("hidden");
-      
-      // Sync UI and redraw map layers
-      updateMapUserMarker();
-      syncStatsUI();
-      renderMissions();
-      renderLeaderboard();
-      renderTerritories();
-      
-      showToast("🗑️ Data Reset", "Reverted database to a clean Level 1 profile.");
-    }
-  });
-
-  document.getElementById("btn-randomize-territories").addEventListener("click", () => {
-    sounds.playClick();
-    const center = userPos;
-    const colors = ['alpha', 'beta'];
-
-    for (let i = 0; i < 3; i++) {
-      const owner = colors[Math.floor(Math.random() * colors.length)];
-      const ox = (Math.random() - 0.5) * 0.003;
-      const oy = (Math.random() - 0.5) * 0.003;
-      const newPt = [
-        [center[0] + ox - 0.0003, center[1] + oy - 0.0004],
-        [center[0] + ox + 0.0003, center[1] + oy - 0.0004],
-        [center[0] + ox + 0.0003, center[1] + oy + 0.0004],
-        [center[0] + ox - 0.0003, center[1] + oy + 0.0004]
+  function renderCoach() {
+    const c = el('chatMessages');
+    if (!c) return;
+    c.innerHTML = '';
+    if (!state.coachHistory.length) {
+      const u = GameData.getUser();
+      state.coachHistory = [
+        { role:'bot', text:`👋 Hey ${u?.name||'Runner'}! I'm Terry, your AI fitness coach.` },
+        { role:'bot', text:'📍 GPS territory tracking is active! When you start a session in GPS mode, I\'ll track every step you take.' },
+        { role:'bot', text:'💡 Tip: Walk in a loop to capture a larger territory polygon. The more area you cover, the bigger your zone!' },
       ];
-
-      appState.territories.push({
-        id: `spawn-ai-${Date.now()}-${i}`,
-        owner: owner,
-        name: `Spawn Sector ${i+1}`,
-        strength: 50 + Math.floor(Math.random() * 50),
-        points: newPt
-      });
     }
-
-    renderTerritories();
-    saveState();
-    showToast("🎲 Territories Spawned!", "Created rival zones nearby. Defend your turf!");
-  });
-
-  // Emojis selector list
-  const avatarOpts = document.querySelectorAll("#profile-emoji-selectors .avatar-opt");
-  avatarOpts.forEach(opt => {
-    opt.addEventListener("click", () => {
-      sounds.playClick();
-      avatarOpts.forEach(o => o.classList.remove("active"));
-      opt.classList.add("active");
-      
-      const emoji = opt.dataset.emoji;
-      appState.user.avatar = emoji;
-      appState.user.avatarImage = ""; // Clear uploaded image if emoji selected
-      
-      updateMapUserMarker();
-      saveState();
-      syncStatsUI();
-      renderLeaderboard();
+    state.coachHistory.forEach(m => {
+      const div = document.createElement('div');
+      div.className = `chat-bubble ${m.role}`;
+      div.textContent = m.text;
+      c.appendChild(div);
     });
-  });
-}
-
-// --- Initialization triggers ---
-document.addEventListener("DOMContentLoaded", () => {
-  loadState();
-
-  // Handle Level Up close
-  document.getElementById("modal-close-btn").addEventListener("click", () => {
-    sounds.playClick();
-    document.getElementById("level-up-modal").classList.add("hidden");
-  });
-
-  // Start activity dashboard CTA button
-  document.getElementById("home-start-btn").addEventListener("click", () => {
-    sounds.playClick();
-    const mapTab = document.querySelector('.nav-tab[data-screen="map"]');
-    if (mapTab) mapTab.click();
-    setTimeout(() => {
-      document.getElementById("tracker-start-btn").click();
-    }, 300);
-  });
-
-  // ── Day / Night Mode Toggle ──────────────────────────────────────────────
-  const themeBtn = document.getElementById("theme-toggle-btn");
-  const themeIcon = themeBtn.querySelector("i");
-  let isDayMode = localStorage.getItem("my_territory_theme") === "day";
-
-  // Apply saved theme on page load
-  function applyTheme(isDay) {
-    document.body.classList.toggle("day-mode", isDay);
-    themeBtn.classList.toggle("active", isDay);
-    themeIcon.className = isDay ? "fa-solid fa-sun" : "fa-solid fa-moon";
-    themeBtn.title = isDay ? "Switch to Night Mode" : "Switch to Day Mode";
+    setTimeout(() => c.scrollTop = c.scrollHeight, 100);
   }
 
-  applyTheme(isDayMode);
+  function sendChat() {
+    const input = el('chatInput');
+    const text = (input?.value || '').trim();
+    if (!text) return;
+    input.value = '';
+    _addMsg('user', text);
+    _showTyping();
+    setTimeout(() => {
+      _removeTyping();
+      _addMsg('bot', _getReply(text.toLowerCase()));
+    }, 700 + Math.random()*600);
+  }
 
-  themeBtn.addEventListener("click", () => {
-    isDayMode = !isDayMode;
-    applyTheme(isDayMode);
-    localStorage.setItem("my_territory_theme", isDayMode ? "day" : "night");
-    sounds.playClick();
-  });
+  function sendPrompt(text) {
+    if (el('chatInput')) el('chatInput').value = text;
+    sendChat();
+  }
 
-  // ── Mobile / Laptop View Toggle ──────────────────────────────────────────
-  const viewBtn  = document.getElementById("view-toggle-btn");
-  const viewIcon = viewBtn.querySelector("i");
-  let isLaptopView = false;
+  function _addMsg(role, text) {
+    const c = el('chatMessages');
+    const div = document.createElement('div');
+    div.className = `chat-bubble ${role}`;
+    div.textContent = text;
+    c?.appendChild(div);
+    state.coachHistory.push({ role, text });
+    setTimeout(() => c && (c.scrollTop = c.scrollHeight), 100);
+  }
 
-  // Wire laptop-sidebar items to navigate like bottom-nav buttons do
-  document.querySelectorAll("#laptop-sidebar-nav .ls-item").forEach(item => {
-    item.addEventListener("click", () => {
-      const target = item.dataset.screen;
-      if (!target) return;
-      // Navigate using the existing navigation system
-      const existingNavBtn = document.querySelector(`.bottom-nav-btn[data-screen="${target}"], .menu-item[data-screen="${target}"]`);
-      if (existingNavBtn) existingNavBtn.click();
-      // Highlight active sidebar item
-      document.querySelectorAll("#laptop-sidebar-nav .ls-item").forEach(el => el.classList.remove("active"));
-      item.classList.add("active");
-    });
-  });
+  function _showTyping() {
+    const c = el('chatMessages');
+    const div = document.createElement('div');
+    div.id = 'typingIndicator';
+    div.className = 'chat-typing';
+    div.innerHTML = '<div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>';
+    c?.appendChild(div);
+    setTimeout(() => c && (c.scrollTop = c.scrollHeight), 50);
+  }
 
-  viewBtn.addEventListener("click", () => {
-    isLaptopView = !isLaptopView;
-    document.body.classList.toggle("laptop-view", isLaptopView);
-    viewBtn.classList.toggle("active", isLaptopView);
-    viewIcon.className = isLaptopView ? "fa-solid fa-laptop" : "fa-solid fa-mobile-screen";
-    viewBtn.title = isLaptopView ? "Switch to Mobile View" : "Switch to Laptop View";
-    sounds.playClick();
-  });
+  function _removeTyping() {
+    el('typingIndicator')?.remove();
+  }
 
-
-
-  // Renders
-  renderMissions();
-  renderLeaderboard();
-
-  // Initialise
-  initNavigation();
-  initMap();
-  initCoachChat();
-  initNotificationSimulator();
-  initProfileActions();
-  initChallengesFilter();
-  initAuth();
-  initTimeMachine();
-  initZarssChart();
-
-  // Run Splash loading
-  let width = 0;
-  const fill = document.getElementById("splash-progress");
-  const splashTimer = setInterval(() => {
-    width += 5;
-    fill.style.width = width + "%";
-    if (width >= 100) {
-      clearInterval(splashTimer);
-      document.getElementById("splash-screen").classList.add("hidden");
-      
-      // Auth routing check
-      if (appState.user.isLoggedIn) {
-        document.getElementById("main-app").classList.remove("hidden");
-        syncStatsUI();
-        sounds.playTone(400, 'sine', 0.2);
-      } else {
-        document.getElementById("auth-screen").classList.remove("hidden");
-      }
+  function _getReply(text) {
+    for (const rule of COACH_RULES) {
+      if (rule.kw.some(k => text.includes(k))) return rule.reply;
     }
-  }, 60);
+    return `🤖 Great question! Based on your activity data, I recommend exploring new routes to expand your territory. Variety keeps both your body AND your leaderboard rank improving! 🗺️`;
+  }
+
+  /* ── PROFILE ── */
+  function renderProfile() {
+    const u = GameData.getUser();
+    if (!u) return;
+    el('profileAvatar').textContent = u.emoji || '🏃';
+    el('profileName').textContent = u.name;
+    el('profileLevel').textContent = `Level ${u.level} · ${getLevelTitle(u.level)}`;
+    el('profilePhone').textContent = u.phone || '';
+    el('pStreak').textContent = `${u.streak||0} Days 🔥`;
+    el('pHealth').textContent = `${u.healthScore||80}/100 ❤️`;
+    const terrs = GameData.getTerritories();
+    const totalArea = terrs.reduce((s,t) => s+(t.area||0), 0);
+    el('pTotalArea').textContent = totalArea.toLocaleString() + ' m²';
+    el('pTotalDist').textContent = ((u.totalDist||0)/1000).toFixed(1) + ' km';
+    el('pSessions').textContent = u.sessions || 0;
+    MapEngine.loadSavedGMKey();
+  }
+
+  function setEmoji(btn) {
+    document.querySelectorAll('.emoji-opt').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const em = btn.dataset.em;
+    GameData.updateUser({ emoji: em });
+    el('profileAvatar').textContent = em;
+    el('topAvatar').textContent = em;
+    showToast(`Avatar updated to ${em}`);
+  }
+
+  function spawnRivals() {
+    const names = ['BlazeDash','SwiftWolf','NeonPace','UrbanFox'];
+    const emojis = ['🔥','🐺','⚡','🦊'];
+    const i = Math.floor(Math.random() * names.length);
+    showToast(`⚡ ${emojis[i]} ${names[i]} just entered your local area!`);
+  }
+
+  /* ── MODALS ── */
+  function showModal(id) {
+    const m = el(id);
+    if (m) m.classList.remove('hidden');
+  }
+
+  function closeModal(id) {
+    const m = el(id);
+    if (m) m.classList.add('hidden');
+  }
+
+  /* ── KEYBOARD ── */
+  document.addEventListener('keydown', e => {
+    if (state.screen !== 'map') return;
+    if (state.mode !== 'sim') return;
+    const map = { ArrowUp:'N', ArrowDown:'S', ArrowLeft:'W', ArrowRight:'E' };
+    if (map[e.key]) { e.preventDefault(); doSimMove(map[e.key]); }
+  });
+
+  return {
+    navigate, startActivity,
+    setMode, setSpeed,
+    startSession, stopSession, pauseSession,
+    dpadStart, dpadStop, centerMap,
+    defendTerritory, viewTerritory, fastForward,
+    setQuestTab, setLeaderTab,
+    sendChat, sendPrompt,
+    setEmoji, spawnRivals,
+    showModal, closeModal,
+    _onGPSUpdate, _onSimMove,
+    updateHeader,
+  };
+})();
+
+/* ═══════════════════════════════════════════════
+   INIT GAME DATA (called after registration)
+═══════════════════════════════════════════════ */
+function initGameData(phone) {
+  GameData.init(phone);
+}
+
+/* ═══════════════════════════════════════════════
+   BOOT SEQUENCE
+═══════════════════════════════════════════════ */
+function bootApp() {
+  // Run splash
+  const splashBar = el('splashBar');
+  if (splashBar) setTimeout(() => splashBar.style.width = '100%', 80);
+
+  // Hints cycle
+  const hints = ['Locating territories...','Loading your map...','Syncing leaderboard...','Ready!'];
+  let hi = 0;
+  const hintInterval = setInterval(() => {
+    hi++;
+    if (el('splashHint')) el('splashHint').textContent = hints[hi] || 'Ready!';
+    if (hi >= hints.length - 1) clearInterval(hintInterval);
+  }, 500);
+
+  setTimeout(() => {
+    const splash = el('splash');
+    if (splash) splash.classList.add('fade-out');
+    setTimeout(() => {
+      if (splash) splash.style.display = 'none';
+      const app = el('app');
+      if (app) app.classList.remove('hidden');
+
+      // Init game data
+      const u = Auth.currentUser();
+      if (u) GameData.init(u.phone);
+
+      // Render
+      App.updateHeader();
+      App.navigate('home');
+
+      setTimeout(() => {
+        const u = GameData.getUser();
+        showToast(`👋 Welcome back, ${u?.name || 'Runner'}! Let's capture territory!`);
+      }, 600);
+    }, 600);
+  }, 2200);
+}
+
+/* ═══════════════════════════════════════════════
+   ENTRY POINT
+═══════════════════════════════════════════════ */
+window.addEventListener('load', () => {
+  // Check auth: if logged in, boot directly; else show auth overlay
+  if (Auth.check()) {
+    bootApp();
+  }
+  // Auth overlay is already visible if not logged in
+  // (shown by default in HTML, hidden after successful auth)
 });

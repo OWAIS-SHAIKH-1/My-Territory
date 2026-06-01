@@ -10,21 +10,19 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  flutter_map: ^4.4.0
-  latlong2: ^0.9.0
-  shared_preferences: ^2.2.0
-  crypto: ^3.0.2
 
-dev_dependencies:
-  flutter_test:
-    sdk: flutter
-  flutter_launcher_icons: ^0.11.0
+  # Maps & Location (stable ecosystem)
+  google_maps_flutter: ^2.6.0
+  geolocator: ^14.0.2
+  flutter_map: ^8.3.0
+  latlong2: ^0.9.1
 
-flutter_icons:
-  android: true
-  ios: true
-  image_path: "assets/icon/app_icon.png"
-  remove_alpha_ios: true
+  # Storage & Utilities
+  shared_preferences: ^2.2.3
+  crypto: ^3.0.3
 
-flutter:
-  uses-material-design: true
+  # Firebase (latest stable compatible line)
+  firebase_core: ^4.10.0
+  firebase_auth: ^6.5.2
+  cloud_firestore: ^6.5.0
+  firebase_messaging: ^16.3.0

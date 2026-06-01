@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../auth_repository.dart';
+import '../data/game_state.dart';
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
@@ -19,6 +20,7 @@ class _AuthScreenState extends State<AuthScreen> {
   final _loginPhoneController = TextEditingController();
   final _loginPasswordController = TextEditingController();
   bool _isRegister = true;
+  String _selectedAvatar = '🏃‍♂️';
 
   @override
   void dispose() {
@@ -47,11 +49,14 @@ class _AuthScreenState extends State<AuthScreen> {
       email: _emailController.text.trim(),
       phone: _phoneController.text.trim(),
       password: _passwordController.text,
+      avatar: _selectedAvatar,
     );
 
     if (!mounted) return;
     if (result.success) {
       _showMessage(result.message);
+      await GameState().loadState();
+      if (!mounted) return;
       Navigator.pushReplacementNamed(context, '/dashboard');
     } else {
       _showMessage(result.message, isError: true);
@@ -73,6 +78,8 @@ class _AuthScreenState extends State<AuthScreen> {
       if (!mounted) return;
       if (result.success) {
         _showMessage(result.message);
+        await GameState().loadState();
+        if (!mounted) return;
         Navigator.pushReplacementNamed(context, '/dashboard');
       } else {
         _showMessage(result.message, isError: true);
@@ -127,6 +134,7 @@ class _AuthScreenState extends State<AuthScreen> {
                 final result = await _authRepository.verifyOtp(otpController.text.trim());
                 if (!mounted) return;
                 if (result.success) {
+                  await GameState().loadState();
                   if (context.mounted) {
                     Navigator.of(context).pop();
                     _showMessage(result.message);
@@ -218,6 +226,34 @@ class _AuthScreenState extends State<AuthScreen> {
             obscureText: true,
             decoration: const InputDecoration(labelText: 'Password'),
             validator: (value) => (value == null || value.length < 6) ? 'Use 6+ characters' : null,
+          ),
+          const SizedBox(height: 16),
+          const Text('Select Emoji Avatar', style: TextStyle(fontWeight: FontWeight.w700, color: Colors.blueGrey)),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: ['🏃‍♂️', '🏃‍♀️', '🦁', '🦉', '⚡'].map((emoji) {
+              final isSelected = _selectedAvatar == emoji;
+              return GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _selectedAvatar = emoji;
+                  });
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: isSelected ? Colors.teal.shade100 : Colors.grey.shade100,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: isSelected ? Colors.teal : Colors.grey.shade300,
+                      width: 2,
+                    ),
+                  ),
+                  child: Text(emoji, style: const TextStyle(fontSize: 24)),
+                ),
+              );
+            }).toList(),
           ),
           const SizedBox(height: 24),
           FilledButton(

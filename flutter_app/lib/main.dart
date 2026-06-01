@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 
+import 'data/game_state.dart';
 import 'screens/auth_screen.dart';
 import 'screens/dashboard_screen.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await GameState().init();
   runApp(const MyTerritoryApp());
 }
 
@@ -34,6 +36,9 @@ class StartupScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (GameState().isLoggedIn) {
+      return const DashboardScreen();
+    }
     return const AuthScreen();
   }
 }

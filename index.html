@@ -2,898 +2,607 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>My Territory - Walk. Run. Capture. Maintain.</title>
-  <!-- SEO & Meta -->
-  <meta name="description" content="Capture your neighborhood, build healthy habits, and compete with friends in My Territory, a gamified fitness app.">
-  <!-- Fonts: Nunito & Montserrat -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>My Territory — Walk. Run. Capture. Maintain.</title>
+  <meta name="description" content="My Territory: Capture real neighborhoods by walking and running. GPS territory strategy game.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;800&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
-  <!-- Leaflet Map CSS -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
-  <!-- Custom Styles -->
-  <link rel="stylesheet" href="style.css?v=2.0">
-  <!-- FontAwesome Icons for modern UI -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Montserrat:wght@700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-  <!-- ================= SPLASH SCREEN ================= -->
-  <div id="splash-screen" class="splash-screen">
+<div class="phone-shell">
+
+  <!-- ===================== AUTH OVERLAY ===================== -->
+  <div id="authOverlay" class="auth-overlay">
+
+    <!-- Decorative BG -->
+    <div class="auth-bg">
+      <div class="auth-orb auth-orb1"></div>
+      <div class="auth-orb auth-orb2"></div>
+      <div class="auth-orb auth-orb3"></div>
+    </div>
+
+    <!-- WELCOME PANEL -->
+    <div id="authWelcome" class="auth-panel active">
+      <div class="auth-logo-wrap">
+        <svg viewBox="0 0 100 100" width="80" height="80">
+          <defs><radialGradient id="ag" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#34D399"/><stop offset="100%" stop-color="#059669"/></radialGradient></defs>
+          <circle cx="50" cy="50" r="48" fill="url(#ag)"/>
+          <path d="M30,55 Q50,72 70,55" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round"/>
+          <circle cx="38" cy="40" r="7" fill="#fff"/><circle cx="38" cy="40" r="3.5" fill="#064E3B"/>
+          <circle cx="62" cy="40" r="7" fill="#fff"/><circle cx="62" cy="40" r="3.5" fill="#064E3B"/>
+          <rect x="24" y="19" width="52" height="9" rx="4.5" fill="#3B82F6"/>
+          <polygon points="45,13 55,13 50,22" fill="#FBBF24"/>
+        </svg>
+      </div>
+      <h1 class="auth-app-title">My Territory</h1>
+      <p class="auth-app-sub">Walk. Run. Capture. Maintain.</p>
+      <div class="auth-welcome-btns">
+        <button class="auth-btn-primary" onclick="Auth.showRegister()">
+          <i class="fa-solid fa-user-plus"></i> Create Account
+        </button>
+        <button class="auth-btn-secondary" onclick="Auth.showLogin()">
+          <i class="fa-solid fa-right-to-bracket"></i> Sign In
+        </button>
+      </div>
+      <p class="auth-tos">By continuing, you agree to our <span style="color:var(--primary)">Terms of Service</span></p>
+    </div>
+
+    <!-- REGISTER PANEL -->
+    <div id="authRegister" class="auth-panel">
+      <button class="auth-back-btn" onclick="Auth.back()"><i class="fa-solid fa-arrow-left"></i></button>
+
+      <!-- Step indicator -->
+      <div class="auth-steps">
+        <div class="auth-step-dot active" id="rDot1"></div>
+        <div class="auth-step-line" id="rLine12"></div>
+        <div class="auth-step-dot" id="rDot2"></div>
+        <div class="auth-step-line" id="rLine23"></div>
+        <div class="auth-step-dot" id="rDot3"></div>
+      </div>
+
+      <!-- Step 1: Name + Phone -->
+      <div id="regStep1" class="reg-step active">
+        <div class="auth-step-icon">📱</div>
+        <h2 class="auth-title">Create Account</h2>
+        <p class="auth-subtitle">Enter your details to get started</p>
+        <div class="auth-form">
+          <div class="auth-input-group">
+            <label>Full Name</label>
+            <div class="auth-input-wrap">
+              <i class="fa-solid fa-user auth-input-icon"></i>
+              <input type="text" id="regName" placeholder="e.g. Alex Runner" autocomplete="name">
+            </div>
+          </div>
+          <div class="auth-input-group">
+            <label>Phone Number</label>
+            <div class="auth-input-wrap phone-wrap">
+              <div class="country-code" onclick="Auth.toggleCountry(event)">
+                <span id="countryFlag">🇺🇸</span>
+                <span id="countryCode">+1</span>
+                <i class="fa-solid fa-chevron-down" id="countryChevron" style="font-size:0.6rem;transition:transform 0.2s"></i>
+              </div>
+              <input type="tel" id="regPhone" placeholder="(555) 000-0000" autocomplete="tel">
+            </div>
+            <!-- Country Dropdown -->
+            <div class="country-dropdown hidden" id="countryDropdown" onclick="event.stopPropagation()">
+              <div class="country-opt" data-code="+1" data-flag="🇺🇸" onclick="Auth.selectCountry(this); event.stopPropagation()">🇺🇸 United States +1</div>
+              <div class="country-opt" data-code="+44" data-flag="🇬🇧" onclick="Auth.selectCountry(this); event.stopPropagation()">🇬🇧 United Kingdom +44</div>
+              <div class="country-opt" data-code="+91" data-flag="🇮🇳" onclick="Auth.selectCountry(this); event.stopPropagation()">🇮🇳 India +91</div>
+              <div class="country-opt" data-code="+92" data-flag="🇵🇰" onclick="Auth.selectCountry(this); event.stopPropagation()">🇵🇰 Pakistan +92</div>
+              <div class="country-opt" data-code="+971" data-flag="🇦🇪" onclick="Auth.selectCountry(this); event.stopPropagation()">🇦🇪 UAE +971</div>
+              <div class="country-opt" data-code="+61" data-flag="🇦🇺" onclick="Auth.selectCountry(this); event.stopPropagation()">🇦🇺 Australia +61</div>
+              <div class="country-opt" data-code="+49" data-flag="🇩🇪" onclick="Auth.selectCountry(this); event.stopPropagation()">🇩🇪 Germany +49</div>
+              <div class="country-opt" data-code="+33" data-flag="🇫🇷" onclick="Auth.selectCountry(this); event.stopPropagation()">🇫🇷 France +33</div>
+              <div class="country-opt" data-code="+86" data-flag="🇨🇳" onclick="Auth.selectCountry(this); event.stopPropagation()">🇨🇳 China +86</div>
+              <div class="country-opt" data-code="+81" data-flag="🇯🇵" onclick="Auth.selectCountry(this); event.stopPropagation()">🇯🇵 Japan +81</div>
+            </div>
+          </div>
+          <button class="auth-btn-primary" onclick="Auth.sendOTP()" id="sendOTPBtn">
+            <i class="fa-solid fa-message"></i> Send OTP
+          </button>
+        </div>
+      </div>
+
+      <!-- Step 2: OTP Verification -->
+      <div id="regStep2" class="reg-step">
+        <div class="auth-step-icon">🔐</div>
+        <h2 class="auth-title">Verify Phone</h2>
+        <p class="auth-subtitle" id="otpSentTo">OTP sent to your phone</p>
+
+        <!-- DEMO OTP Preview Box -->
+        <div class="otp-demo-box" id="otpDemoBox">
+          <div class="otp-demo-label">📱 Demo SMS Preview</div>
+          <div class="otp-demo-msg">Your My Territory code: <strong id="otpDemoCode">------</strong></div>
+          <div class="otp-demo-note">In production, this is sent via SMS</div>
+        </div>
+
+        <div class="otp-row" id="otpRow">
+          <input class="otp-box" type="text" inputmode="numeric" maxlength="1" data-index="0" oninput="Auth.otpInput(this)" onkeydown="Auth.otpKeydown(event,this)">
+          <input class="otp-box" type="text" inputmode="numeric" maxlength="1" data-index="1" oninput="Auth.otpInput(this)" onkeydown="Auth.otpKeydown(event,this)">
+          <input class="otp-box" type="text" inputmode="numeric" maxlength="1" data-index="2" oninput="Auth.otpInput(this)" onkeydown="Auth.otpKeydown(event,this)">
+          <input class="otp-box" type="text" inputmode="numeric" maxlength="1" data-index="3" oninput="Auth.otpInput(this)" onkeydown="Auth.otpKeydown(event,this)">
+          <input class="otp-box" type="text" inputmode="numeric" maxlength="1" data-index="4" oninput="Auth.otpInput(this)" onkeydown="Auth.otpKeydown(event,this)">
+          <input class="otp-box" type="text" inputmode="numeric" maxlength="1" data-index="5" oninput="Auth.otpInput(this)" onkeydown="Auth.otpKeydown(event,this)">
+        </div>
+        <button class="auth-btn-primary" onclick="Auth.verifyOTP()" id="verifyOTPBtn">
+          <i class="fa-solid fa-check"></i> Verify OTP
+        </button>
+        <button class="auth-resend-btn" id="resendBtn" onclick="Auth.resendOTP()">Didn't receive it? <span class="resend-link">Resend</span></button>
+        <div class="otp-timer" id="otpTimer">Resend in <span id="timerCount">60</span>s</div>
+      </div>
+
+      <!-- Step 3: Set Password -->
+      <div id="regStep3" class="reg-step">
+        <div class="auth-step-icon">🔒</div>
+        <h2 class="auth-title">Set Password</h2>
+        <p class="auth-subtitle">Choose a strong password for daily login</p>
+        <div class="auth-form">
+          <div class="auth-input-group">
+            <label>Password</label>
+            <div class="auth-input-wrap">
+              <i class="fa-solid fa-lock auth-input-icon"></i>
+              <input type="password" id="regPass" placeholder="Min. 8 characters" oninput="Auth.checkPassStrength()">
+              <button class="eye-btn" onclick="Auth.togglePass('regPass', this)"><i class="fa-solid fa-eye"></i></button>
+            </div>
+            <div class="pass-strength-bar"><div class="pass-strength-fill" id="passStrengthFill"></div></div>
+            <div class="pass-strength-label" id="passStrengthLabel"></div>
+          </div>
+          <div class="auth-input-group">
+            <label>Confirm Password</label>
+            <div class="auth-input-wrap">
+              <i class="fa-solid fa-lock auth-input-icon"></i>
+              <input type="password" id="regPassConfirm" placeholder="Re-enter password">
+              <button class="eye-btn" onclick="Auth.togglePass('regPassConfirm', this)"><i class="fa-solid fa-eye"></i></button>
+            </div>
+          </div>
+          <button class="auth-btn-primary" onclick="Auth.createAccount()">
+            <i class="fa-solid fa-rocket"></i> Create Account &amp; Play!
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- LOGIN PANEL -->
+    <div id="authLogin" class="auth-panel">
+      <button class="auth-back-btn" onclick="Auth.back()"><i class="fa-solid fa-arrow-left"></i></button>
+      <div class="auth-step-icon">👋</div>
+      <h2 class="auth-title">Welcome Back!</h2>
+      <p class="auth-subtitle">Sign in to your territory</p>
+      <div class="auth-form">
+        <div class="auth-input-group">
+          <label>Phone Number</label>
+          <div class="auth-input-wrap phone-wrap">
+            <div class="country-code">
+              <span id="loginFlag">🇺🇸</span>
+              <span id="loginCode">+1</span>
+            </div>
+            <input type="tel" id="loginPhone" placeholder="(555) 000-0000" autocomplete="tel">
+          </div>
+        </div>
+        <div class="auth-input-group">
+          <label>Password</label>
+          <div class="auth-input-wrap">
+            <i class="fa-solid fa-lock auth-input-icon"></i>
+            <input type="password" id="loginPass" placeholder="Your password" onkeydown="if(event.key==='Enter') Auth.login()">
+            <button class="eye-btn" onclick="Auth.togglePass('loginPass', this)"><i class="fa-solid fa-eye"></i></button>
+          </div>
+        </div>
+        <button class="auth-btn-primary" onclick="Auth.login()">
+          <i class="fa-solid fa-right-to-bracket"></i> Sign In
+        </button>
+        <button class="auth-forgot-btn" onclick="Auth.forgotPassword()">Forgot password?</button>
+        <div class="auth-divider"><span>or</span></div>
+        <button class="auth-btn-secondary" onclick="Auth.showRegister()">
+          <i class="fa-solid fa-user-plus"></i> Create New Account
+        </button>
+      </div>
+    </div>
+
+    <!-- Auth Error -->
+    <div class="auth-error hidden" id="authError"></div>
+  </div>
+
+  <!-- ===================== GPS PERMISSION OVERLAY ===================== -->
+  <div id="gpsOverlay" class="gps-overlay hidden">
+    <div class="gps-overlay-card">
+      <div class="gps-overlay-icon">📍</div>
+      <h3 class="gps-overlay-title">Location Access Needed</h3>
+      <p class="gps-overlay-msg">My Territory needs your location to track your real-world movement and capture territory.</p>
+      <ul class="gps-list">
+        <li>🗺️ Track your route in real-time</li>
+        <li>🏆 Mark territory you've physically walked</li>
+        <li>🛡️ Compete with nearby players</li>
+      </ul>
+      <button class="gps-grant-btn" onclick="GPS.requestPermission()">
+        <i class="fa-solid fa-location-crosshairs"></i> Enable Location
+      </button>
+      <button class="gps-deny-btn" onclick="GPS.denyPermission()">Use Simulation Mode Instead</button>
+    </div>
+  </div>
+
+  <!-- ===================== SPLASH ===================== -->
+  <div id="splash" class="splash">
     <div class="splash-content">
-      <div class="mascot-container">
-        <!-- SVG Mascot: Terry the Territory Guardian (Duolingo style) -->
-        <svg class="mascot-svg" viewBox="0 0 100 100" width="120" height="120">
-          <circle cx="50" cy="50" r="45" fill="#10B981" />
-          <path d="M 30,55 Q 50,75 70,55" fill="none" stroke="#FFFFFF" stroke-width="6" stroke-linecap="round" />
-          <!-- Animated eyes -->
-          <circle class="mascot-eye" cx="38" cy="40" r="6" fill="#FFFFFF" />
-          <circle cx="38" cy="40" r="3" fill="#111827" />
-          <circle class="mascot-eye" cx="62" cy="40" r="6" fill="#FFFFFF" />
-          <circle cx="62" cy="40" r="3" fill="#111827" />
-          <!-- Running headband -->
-          <rect x="25" y="20" width="50" height="8" rx="4" fill="#3B82F6" />
-          <polygon points="45,15 55,15 50,23" fill="#FBBF24" />
+      <div class="splash-logo">
+        <svg viewBox="0 0 100 100" width="100" height="100">
+          <defs><radialGradient id="sg" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#34D399"/><stop offset="100%" stop-color="#059669"/></radialGradient></defs>
+          <circle cx="50" cy="50" r="48" fill="url(#sg)"/>
+          <path d="M30,55 Q50,72 70,55" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round"/>
+          <circle cx="38" cy="40" r="7" fill="#fff"/><circle cx="38" cy="40" r="3.5" fill="#064E3B"/>
+          <circle cx="62" cy="40" r="7" fill="#fff"/><circle cx="62" cy="40" r="3.5" fill="#064E3B"/>
+          <rect x="24" y="19" width="52" height="9" rx="4.5" fill="#3B82F6"/>
+          <polygon points="45,13 55,13 50,22" fill="#FBBF24"/>
         </svg>
       </div>
       <h1 class="splash-title">My Territory</h1>
-      <p class="splash-tagline">"Walk. Run. Capture. Maintain."</p>
-      <div class="progress-bar-container">
-        <div class="progress-bar-fill" id="splash-progress"></div>
-      </div>
-      <p class="splash-loading-text">Locating territories...</p>
+      <p class="splash-sub">Walk. Run. Capture. Maintain.</p>
+      <div class="splash-bar-wrap"><div class="splash-bar" id="splashBar"></div></div>
+      <p class="splash-hint" id="splashHint">Locating territories...</p>
     </div>
   </div>
 
-  <!-- ================= NOTIFICATION BANNER ================= -->
-  <div id="notification-banner" class="notification-banner hidden">
-    <div class="notif-icon">🛡️</div>
-    <div class="notif-content">
-      <h4 class="notif-title">Territory Guardian</h4>
-      <p class="notif-body">Your territory has lost 15% strength today. Defend it!</p>
-    </div>
-    <button class="notif-close" id="notif-close-btn">&times;</button>
-  </div>
+  <!-- ===================== MAIN APP ===================== -->
+  <div id="app" class="app hidden">
 
-  <!-- ================= AUTH SCREEN (LOGIN / REGISTRATION) ================= -->
-  <div id="auth-screen" class="auth-screen hidden">
-    <div class="auth-card">
-      <div class="mascot-container">
-        <!-- SVG Mascot -->
-        <svg viewBox="0 0 100 100" width="80" height="80">
-          <circle cx="50" cy="50" r="45" fill="#10B981" />
-          <path d="M 30,55 Q 50,75 70,55" fill="none" stroke="#FFFFFF" stroke-width="6" stroke-linecap="round" />
-          <circle cx="38" cy="40" r="6" fill="#FFFFFF" /><circle cx="38" cy="40" r="3" fill="#111827" />
-          <circle cx="62" cy="40" r="6" fill="#FFFFFF" /><circle cx="62" cy="40" r="3" fill="#111827" />
-          <rect x="25" y="20" width="50" height="8" rx="4" fill="#3B82F6" />
-        </svg>
+    <!-- STATUS BAR -->
+    <div class="status-bar">
+      <div class="status-left">
+        <span class="status-avatar" id="topAvatar">🏃</span>
+        <div>
+          <div class="status-name" id="topName">Player</div>
+          <div class="status-level" id="topLevel">Level 1 · Newcomer</div>
+        </div>
       </div>
-      <h2 id="auth-title">Create Account</h2>
-      <p id="auth-subtitle" class="auth-subtitle">Join the territory battles!</p>
+      <div class="status-right">
+        <div class="streak-badge"><i class="fa-solid fa-fire"></i><span id="streakNum">0</span></div>
+        <div class="xp-pill" id="topXP">0 XP</div>
+        <button class="logout-mini-btn" onclick="Auth.logout()" title="Sign Out"><i class="fa-solid fa-right-from-bracket"></i></button>
+      </div>
+    </div>
 
-      <!-- Registration Form -->
-      <form id="register-form" class="auth-form">
-        <div class="input-group">
-          <label for="reg-username">Username</label>
-          <input type="text" id="reg-username" placeholder="e.g. Smarty" required maxlength="16">
-        </div>
-        <div class="input-group">
-          <label for="reg-phone">Phone Number</label>
-          <input type="tel" id="reg-phone" placeholder="+1234567890" required>
-        </div>
-        <div class="input-group">
-          <label for="reg-password">Password</label>
-          <input type="password" id="reg-password" placeholder="Create a password" required minlength="6">
-        </div>
-        <div class="input-group">
-          <label>Avatar / Custom Photo</label>
-          <div class="auth-avatar-setup">
-            <div class="auth-avatar-preview" id="auth-avatar-preview">🏃‍♂️</div>
-            <label for="auth-photo-file" class="avatar-upload-btn">
-              <i class="fa-solid fa-camera"></i>
-            </label>
-            <input type="file" id="auth-photo-file" accept="image/*" style="display:none;">
+    <!-- SCREENS -->
+    <div class="screens">
+
+      <!-- HOME / DASHBOARD -->
+      <section id="screen-home" class="screen active">
+        <div class="screen-scroll">
+          <div class="greeting-block">
+            <h2 class="greeting-title" id="greetMsg">Good Morning! 👋</h2>
+            <p class="greeting-sub">Your territory awaits. Let's move!</p>
           </div>
-          <span style="font-size:10px; color:var(--text-muted); text-align:center; display:block; margin-top:4px;">Upload photo or pick emojis below</span>
-        </div>
-        <div class="input-group">
-          <label for="reg-email">Email Address</label>
-          <input type="email" id="reg-email" placeholder="runner@myterritory.com" required>
-        </div>
-        <button type="submit" class="btn btn-huge btn-primary auth-submit">Start Journey</button>
-        <p class="auth-toggle-text">Already have an account? <span id="to-login-btn">Log In</span></p>
-      </form>
-
-      <!-- Login Form -->
-      <form id="login-form" class="auth-form hidden">
-        <div class="input-group">
-          <label for="login-username">Username</label>
-          <input type="text" id="login-username" placeholder="Enter Username" required>
-        </div>
-        <div class="input-group">
-          <label for="login-phone">Phone Number</label>
-          <input type="tel" id="login-phone" placeholder="+1234567890">
-        </div>
-        <div class="input-group">
-          <label for="login-password">Password (or leave blank to use OTP)</label>
-          <input type="password" id="login-password" placeholder="Enter password">
-        </div>
-        <div style="display:flex; gap:8px; align-items:center; margin-top:8px;">
-          <button type="button" class="btn" id="send-otp-btn">Send OTP</button>
-          <small style="color:var(--text-muted);">Or enter password and press Login</small>
-        </div>
-        <button type="submit" class="btn btn-huge btn-primary auth-submit">Login</button>
-        <p class="auth-toggle-text">New to My Territory? <span id="to-register-btn">Create Account</span></p>
-      </form>
-    </div>
-  </div>
-
-  <!-- ================= LEVEL UP MODAL ================= -->
-  <div id="level-up-modal" class="modal-overlay hidden">
-    <div class="modal-card bounce-in">
-      <div class="confetti-container" id="confetti-canvas-container"></div>
-      <div class="level-up-icon">🏆</div>
-      <h2 class="level-up-title">LEVEL UP!</h2>
-      <p class="level-up-desc">You are now a</p>
-      <div class="level-badge" id="modal-level-badge">Explorer</div>
-      <p class="level-up-xp">Level <span id="modal-level-num">2</span></p>
-      <button class="btn btn-primary" id="modal-close-btn">Awesome!</button>
-    </div>
-  </div>
-
-  <!-- OTP Verification Modal (prototype - OTP shown in-dev for testing) -->
-  <div id="otp-modal" class="modal-overlay hidden">
-    <div class="modal-card">
-      <h3>Enter Verification Code</h3>
-      <p id="otp-phone-display">Code sent to: <strong></strong></p>
-      <div class="input-group">
-        <label for="otp-code-input">6-digit code</label>
-        <input type="text" id="otp-code-input" maxlength="6" inputmode="numeric" pattern="[0-9]*">
-      </div>
-      <div style="display:flex; gap:8px; margin-top:8px;">
-        <button id="otp-verify-btn" class="btn btn-primary">Verify</button>
-        <button id="otp-resend-btn" class="btn">Resend</button>
-        <button id="otp-cancel-btn" class="btn btn-outline">Cancel</button>
-      </div>
-      <p style="font-size:12px; color:var(--text-muted); margin-top:12px;">For prototype testing the OTP is shown below:</p>
-      <div id="dev-otp-display" style="font-weight:700; background:#111; color:#fff; padding:6px 8px; display:inline-block; border-radius:6px; margin-top:6px;">----</div>
-    </div>
-  </div>
-
-  <!-- ================= MAIN APP CONTAINER ================= -->
-  <div class="app-container hidden" id="main-app">
-
-    <!-- ================= DESKTOP SIDEBAR NAVIGATION (Mockup matching ZARSS) ================= -->
-    <aside class="desktop-sidebar">
-      <div class="sidebar-logo">
-        <div class="logo-box"><i class="fa-solid fa-cube"></i></div>
-        <span>My Territory</span>
-      </div>
-      
-      <div class="sidebar-profile">
-        <div class="sidebar-avatar" id="sidebar-avatar-img">🏃‍♂️</div>
-        <span class="sidebar-welcome">Welcome Back,</span>
-        <span class="sidebar-username" id="sidebar-username-txt">Smarty</span>
-      </div>
-      
-      <nav class="sidebar-menu">
-        <button class="menu-item active" data-screen="home">
-          <i class="fa-solid fa-chart-pie"></i>
-          <span>Dashboard</span>
-        </button>
-        <button class="menu-item" data-screen="map">
-          <i class="fa-solid fa-map-location-dot"></i>
-          <span>Territory Map</span>
-        </button>
-        <button class="menu-item" data-screen="defense">
-          <i class="fa-solid fa-shield-halved"></i>
-          <span>Defense Center</span>
-        </button>
-        <button class="menu-item" data-screen="challenges">
-          <i class="fa-solid fa-bullseye"></i>
-          <span>Quests & Badges</span>
-        </button>
-        <button class="menu-item" data-screen="leaderboard">
-          <i class="fa-solid fa-trophy"></i>
-          <span>Leaderboard</span>
-        </button>
-        <button class="menu-item" data-screen="coach">
-          <i class="fa-solid fa-robot"></i>
-          <span>AI Coach</span>
-        </button>
-        <button class="menu-item" data-screen="profile">
-          <i class="fa-solid fa-user-gear"></i>
-          <span>Settings</span>
-        </button>
-        
-        <button class="menu-item logout-item" id="sidebar-btn-logout">
-          <i class="fa-solid fa-right-from-bracket"></i>
-          <span>Log Out</span>
-        </button>
-      </nav>
-    </aside>
-
-    <!-- ================= LAPTOP SIDEBAR (visible in laptop-view mode) ================= -->
-    <nav class="laptop-sidebar" id="laptop-sidebar-nav">
-      <div class="ls-logo"><i class="fa-solid fa-cube"></i> My Territory</div>
-      <div class="ls-item active" data-screen="home">
-        <i class="fa-solid fa-chart-pie"></i> Dashboard
-      </div>
-      <div class="ls-item" data-screen="map">
-        <i class="fa-solid fa-map-location-dot"></i> Territory Map
-      </div>
-      <div class="ls-item" data-screen="defense">
-        <i class="fa-solid fa-shield-halved"></i> Defense Center
-      </div>
-      <div class="ls-item" data-screen="challenges">
-        <i class="fa-solid fa-bullseye"></i> Quests &amp; Badges
-      </div>
-      <div class="ls-item" data-screen="leaderboard">
-        <i class="fa-solid fa-trophy"></i> Leaderboard
-      </div>
-      <div class="ls-item" data-screen="coach">
-        <i class="fa-solid fa-robot"></i> AI Coach
-      </div>
-      <div class="ls-item" data-screen="decay">
-        <i class="fa-solid fa-chart-line"></i> Decay Watch
-      </div>
-      <div class="ls-item" data-screen="profile">
-        <i class="fa-solid fa-user-gear"></i> Settings
-      </div>
-    </nav>
-
-    <!-- ================= MAIN VIEWPORT CONTENT (Mobile Frame / Desktop Right Panel) ================= -->
-    <div class="main-content-wrapper">
-
-      <!-- Top Status Header -->
-      <header class="app-header">
-        <div class="header-left">
-          <div class="user-avatar-small" id="header-avatar">🏃‍♂️</div>
-          <div class="header-user-info">
-            <span class="user-name-header" id="header-username">Smarty</span>
-            <div class="user-level-badge">Lvl <span id="header-level">12</span></div>
-          </div>
-        </div>
-        
-        <!-- Desktop Header Title (Centered Search Bar matching Zarss) -->
-        <div class="desktop-header-search">
-          <i class="fa-solid fa-magnifying-glass"></i>
-          <input type="text" placeholder="Search capture points, users, regions...">
-        </div>
-
-        <div class="header-right">
-          <div class="streak-header-badge" id="header-streak-badge" title="Daily Streak">
-            🔥 <span id="header-streak">7</span>d
-          </div>
-          <button class="icon-btn" id="notif-trigger-btn" title="Test Guardian Notification">
-            <i class="fa-solid fa-bell"></i>
-          </button>
-          <!-- Day / Night Mode Toggle -->
-          <button class="icon-btn view-ctrl-btn" id="theme-toggle-btn" title="Toggle Day / Night Mode">
-            <i class="fa-solid fa-moon"></i>
-          </button>
-          <!-- Mobile / Laptop View Toggle -->
-          <button class="icon-btn view-ctrl-btn" id="view-toggle-btn" title="Switch Mobile / Laptop View">
-            <i class="fa-solid fa-mobile-screen"></i>
-          </button>
-        </div>
-      </header>
-
-      <!-- Sub-header: XP Tracker Progress -->
-      <div class="xp-sub-header">
-        <div class="xp-label-row">
-          <span class="xp-rank-title" id="header-rank-title">Explorer</span>
-          <span class="xp-numbers"><span id="header-xp-current">700</span> / <span id="header-xp-max">1000</span> XP</span>
-        </div>
-        <div class="xp-bar-container">
-          <div class="xp-bar-fill" id="header-xp-bar" style="width: 70%;"></div>
-        </div>
-      </div>
-
-      <!-- Active Quest Header Overlay -->
-      <div class="active-workout-header hidden" id="active-workout-bar">
-        <div class="pulse-dot"></div>
-        <span id="active-workout-text">Active Session • Simulating Movement</span>
-      </div>
-
-      <!-- ================= SCREENS CONTAINERS ================= -->
-      <main class="screens-viewport">
-
-        <!-- 1. HOME SCREEN -->
-        <section id="screen-home" class="app-screen active">
-          <div class="scroll-container">
-            <div class="welcome-box">
-              <h2>Welcome Back, <span id="welcome-name">Smarty</span></h2>
-              <p class="greeting-subtitle">Payments & Activity Updates</p>
+          <div class="stats-row">
+            <div class="stat-card green">
+              <div class="stat-icon"><i class="fa-solid fa-heart-pulse" style="color:var(--primary)"></i></div>
+              <div class="stat-value" id="healthScore">80</div>
+              <div class="stat-label">Health Score</div>
             </div>
-
-            <!-- Zarss Inspired Modern Top Row Cards (Balance, Sales, Upgrade Gradient) -->
-            <div class="zarss-cards-row">
-              <!-- HSL Soft Green Card -->
-              <div class="zarss-card soft-green">
-                <div class="zc-header">
-                  <span class="zc-title"><i class="fa-solid fa-earth-americas"></i> Captured Area</span>
-                  <span class="zc-pct-badge">+17%</span>
-                </div>
-                <div class="zc-value" id="dashboard-territory-size">24,500m²</div>
-                <!-- Mini sparkline SVG -->
-                <svg class="zc-sparkline" viewBox="0 0 100 20">
-                  <path d="M 0,18 Q 20,8 40,12 T 80,4 T 100,10" fill="none" stroke="#10B981" stroke-width="2" stroke-linecap="round"></path>
-                </svg>
-              </div>
-
-              <!-- HSL Soft Yellow Card -->
-              <div class="zarss-card soft-yellow">
-                <div class="zc-header">
-                  <span class="zc-title"><i class="fa-solid fa-heart-pulse"></i> Health Score</span>
-                  <span class="zc-pct-badge">+23%</span>
-                </div>
-                <div class="zc-value" id="dashboard-health-score">82/100</div>
-                <!-- Mini sparkline SVG -->
-                <svg class="zc-sparkline" viewBox="0 0 100 20">
-                  <path d="M 0,15 Q 15,18 30,10 T 60,15 T 80,5 T 100,8" fill="none" stroke="#F59E0B" stroke-width="2" stroke-linecap="round"></path>
-                </svg>
-              </div>
-
-              <!-- HSL Soft Purple Gradient Card -->
-              <div class="zarss-card gradient-purple">
-                <div class="zc-upgrade-info">
-                  <h4>Terry Pro Coach</h4>
-                  <p>Get personalized smart routes and goals.</p>
-                </div>
-                <button class="btn zc-upgrade-btn" id="dashboard-upgrade-cta-btn">Unlock AI</button>
-              </div>
+            <div class="stat-card blue">
+              <div class="stat-icon"><i class="fa-solid fa-person-running" style="color:var(--blue-light)"></i></div>
+              <div class="stat-value" id="todayDist">0<span style="font-size:0.6em">km</span></div>
+              <div class="stat-label">Today</div>
             </div>
+            <div class="stat-card orange">
+              <div class="stat-icon"><i class="fa-solid fa-shield-halved" style="color:var(--orange)"></i></div>
+              <div class="stat-value" id="terrStrength">0<span style="font-size:0.6em">%</span></div>
+              <div class="stat-label">Territory</div>
+            </div>
+          </div>
+          <div class="xp-bar-card">
+            <div class="xp-bar-top">
+              <span class="xp-bar-label">XP Progress</span>
+              <span class="xp-bar-nums" id="xpBarNums">0 / 500 XP</span>
+            </div>
+            <div class="xp-bar-track"><div class="xp-bar-fill" id="xpBarFill" style="width:0%"></div></div>
+            <div class="xp-bar-bottom"><span id="levelFrom">Level 1</span><span id="levelTo">Level 2</span></div>
+          </div>
+          <button class="start-btn" id="startActivityBtn" onclick="App.startActivity()">
+            <div class="start-btn-inner">
+              <i class="fa-solid fa-play"></i><span>START ACTIVITY</span>
+            </div>
+            <div class="start-btn-glow"></div>
+          </button>
+          <div class="section-header">
+            <h3 class="section-title">Today's Goals</h3>
+            <button class="see-all-btn" onclick="App.navigate('challenges')">See All</button>
+          </div>
+          <div class="quest-list" id="homeQuestList"></div>
+          <div class="notif-preview-block">
+            <h3 class="section-title" style="margin-bottom:12px">Activity Feed</h3>
+            <div class="notif-card"><span class="notif-em">📍</span><span id="lastLocationCard">GPS ready — go for a walk to capture territory!</span></div>
+            <div class="notif-card"><span class="notif-em">🔥</span><span>Keep your streak alive — go for a walk today.</span></div>
+            <div class="notif-card"><span class="notif-em">🛡️</span><span>New territory captured: it starts decaying after 24hrs. Defend it!</span></div>
+          </div>
+        </div>
+      </section>
 
-            <!-- Main CTA Button -->
-            <div class="cta-section">
-              <button class="btn btn-huge btn-primary start-activity-btn" id="home-start-btn">
-                <i class="fa-solid fa-play"></i> START ACTIVITY
+      <!-- LIVE ACTIVITY MAP -->
+      <section id="screen-map" class="screen">
+        <div class="map-wrapper">
+          <div id="leafletMap" style="width:100%;height:100%;"></div>
+
+          <!-- GPS Accuracy Badge -->
+          <div class="gps-accuracy-badge hidden" id="gpsBadge">
+            <span class="gps-dot"></span>
+            <span id="gpsAccText">GPS: --m</span>
+          </div>
+
+          <!-- HUD Top -->
+          <div class="map-hud-top">
+            <div class="hud-stat"><div class="hud-val" id="hudDist">0.00</div><div class="hud-lbl">km</div></div>
+            <div class="hud-stat"><div class="hud-val" id="hudTime">00:00</div><div class="hud-lbl">time</div></div>
+            <div class="hud-stat"><div class="hud-val" id="hudSpeed">0.0</div><div class="hud-lbl">km/h</div></div>
+            <div class="hud-stat"><div class="hud-val" id="hudArea">0</div><div class="hud-lbl">m²</div></div>
+          </div>
+
+          <!-- Mode Toggle -->
+          <div class="mode-bar">
+            <span class="mode-label">Mode:</span>
+            <div class="mode-pills">
+              <button class="mode-pill active" id="modeSimBtn" onclick="App.setMode('sim')">🎮 Sim</button>
+              <button class="mode-pill" id="modeGpsBtn" onclick="App.setMode('gps')">📡 GPS</button>
+            </div>
+          </div>
+
+          <!-- D-Pad (Sim mode) -->
+          <div class="dpad-container" id="dpadContainer">
+            <div class="dpad-row">
+              <button class="dpad-btn" onpointerdown="App.dpadStart('N')" onpointerup="App.dpadStop()" onpointerleave="App.dpadStop()"><i class="fa-solid fa-chevron-up"></i></button>
+            </div>
+            <div class="dpad-row">
+              <button class="dpad-btn" onpointerdown="App.dpadStart('W')" onpointerup="App.dpadStop()" onpointerleave="App.dpadStop()"><i class="fa-solid fa-chevron-left"></i></button>
+              <button class="dpad-btn dpad-center" onclick="App.centerMap()"><i class="fa-solid fa-location-crosshairs"></i></button>
+              <button class="dpad-btn" onpointerdown="App.dpadStart('E')" onpointerup="App.dpadStop()" onpointerleave="App.dpadStop()"><i class="fa-solid fa-chevron-right"></i></button>
+            </div>
+            <div class="dpad-row">
+              <button class="dpad-btn" onpointerdown="App.dpadStart('S')" onpointerup="App.dpadStop()" onpointerleave="App.dpadStop()"><i class="fa-solid fa-chevron-down"></i></button>
+            </div>
+          </div>
+
+          <!-- Speed Pills (Sim) -->
+          <div class="speed-pills" id="speedPills">
+            <button class="speed-pill active" id="spWalk" onclick="App.setSpeed('walk')">🚶 Walk</button>
+            <button class="speed-pill" id="spJog" onclick="App.setSpeed('jog')">🏃 Jog</button>
+            <button class="speed-pill" id="spRun" onclick="App.setSpeed('run')">⚡ Run</button>
+          </div>
+
+          <!-- GPS Status Panel (GPS mode) -->
+          <div class="gps-status-panel hidden" id="gpsStatusPanel">
+            <div class="gps-status-row">
+              <span class="gps-pulsedot" id="gpsPulseDot"></span>
+              <span id="gpsStatusText">Searching for GPS signal...</span>
+            </div>
+            <div id="gpsCoords" class="gps-coords-text"></div>
+          </div>
+
+          <!-- Session Controls -->
+          <div class="session-controls" id="sessionControls">
+            <button class="ctrl-btn stop-btn hidden" id="stopBtn" onclick="App.stopSession()"><i class="fa-solid fa-stop"></i> Stop &amp; Save</button>
+            <button class="ctrl-btn start-session-btn" id="startBtn" onclick="App.startSession()"><i class="fa-solid fa-play"></i> Start Capture</button>
+            <button class="ctrl-btn pause-btn hidden" id="pauseBtn" onclick="App.pauseSession()"><i class="fa-solid fa-pause"></i> Pause</button>
+          </div>
+
+          <!-- Map Legend -->
+          <div class="map-legend">
+            <div class="legend-item"><span class="legend-dot" style="background:#3B82F6"></span>You</div>
+            <div class="legend-item"><span class="legend-dot" style="background:#10B981;opacity:0.7"></span>Your Zone</div>
+            <div class="legend-item"><span class="legend-dot" style="background:#EF4444"></span>Rival</div>
+            <div class="legend-item"><span class="legend-dot" style="background:#6B7280"></span>Neutral</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- DEFENSE -->
+      <section id="screen-defense" class="screen">
+        <div class="screen-scroll">
+          <h2 class="screen-title">🛡️ Defense Center</h2>
+          <div class="tm-card">
+            <div class="tm-header">
+              <div><div class="tm-title">⏳ Territory Time Machine</div><div class="tm-desc">Simulate territory decay over time</div></div>
+              <span class="badge-pill orange">Demo</span>
+            </div>
+            <div class="tm-btn-row">
+              <button class="tm-btn" onclick="App.fastForward(1)">+1 Day</button>
+              <button class="tm-btn" onclick="App.fastForward(3)">+3 Days</button>
+              <button class="tm-btn" onclick="App.fastForward(7)">+7 Days</button>
+            </div>
+          </div>
+          <div class="decay-pills-row" id="decayPillsRow"></div>
+          <div class="section-header">
+            <h3 class="section-title">Your Territories</h3>
+            <span class="badge-pill green" id="terrCount">0 Active</span>
+          </div>
+          <div id="territoryList" class="territory-list"></div>
+        </div>
+      </section>
+
+      <!-- CHALLENGES -->
+      <section id="screen-challenges" class="screen">
+        <div class="screen-scroll">
+          <h2 class="screen-title">🎯 Daily Challenges</h2>
+          <div class="tab-pills">
+            <button class="tab-pill active" id="tabDaily" onclick="App.setQuestTab('daily')">Daily</button>
+            <button class="tab-pill" id="tabWeekly" onclick="App.setQuestTab('weekly')">Weekly</button>
+          </div>
+          <div id="challengeList" class="quest-list"></div>
+          <h3 class="section-title" style="margin-top:20px">Achievements</h3>
+          <div class="badges-grid" id="badgesGrid"></div>
+        </div>
+      </section>
+
+      <!-- LEADERBOARD -->
+      <section id="screen-leaderboard" class="screen">
+        <div class="screen-scroll">
+          <h2 class="screen-title">🏆 Leaderboard</h2>
+          <div class="tab-pills">
+            <button class="tab-pill active" onclick="App.setLeaderTab('local')">Local</button>
+            <button class="tab-pill" onclick="App.setLeaderTab('global')">Global</button>
+          </div>
+          <div class="podium" id="podium"></div>
+          <div class="section-header"><h3 class="section-title">Rankings</h3></div>
+          <div id="leaderList" class="leader-list"></div>
+        </div>
+      </section>
+
+      <!-- AI COACH -->
+      <section id="screen-coach" class="screen">
+        <div class="coach-screen">
+          <div class="coach-header">
+            <div class="coach-avatar">🤖</div>
+            <div>
+              <div class="coach-name">Terry — AI Coach</div>
+              <div class="coach-status"><span class="online-dot"></span>Online</div>
+            </div>
+          </div>
+          <div class="chat-messages" id="chatMessages"></div>
+          <div class="quick-prompts">
+            <button class="quick-chip" onclick="App.sendPrompt('How am I doing this week?')">📊 Weekly recap</button>
+            <button class="quick-chip" onclick="App.sendPrompt('What should my goal be tomorrow?')">🎯 Tomorrow\'s goal</button>
+            <button class="quick-chip" onclick="App.sendPrompt('Am I overtraining?')">💪 Fatigue check</button>
+            <button class="quick-chip" onclick="App.sendPrompt('How do I protect my streak?')">🔥 Protect streak</button>
+          </div>
+          <div class="chat-input-row">
+            <input class="chat-input" id="chatInput" type="text" placeholder="Ask Terry anything..." onkeydown="if(event.key==='Enter') App.sendChat()">
+            <button class="chat-send" onclick="App.sendChat()"><i class="fa-solid fa-paper-plane"></i></button>
+          </div>
+        </div>
+      </section>
+
+      <!-- PROFILE -->
+      <section id="screen-profile" class="screen">
+        <div class="screen-scroll">
+          <div class="profile-hero">
+            <div class="profile-avatar-wrap">
+              <div class="profile-avatar" id="profileAvatar">🏃</div>
+            </div>
+            <h2 class="profile-name" id="profileName">Player</h2>
+            <div class="profile-level" id="profileLevel">Level 1 · Newcomer</div>
+            <div class="profile-phone" id="profilePhone"></div>
+            <div class="profile-emoji-row">
+              <button class="emoji-opt active" data-em="🏃" onclick="App.setEmoji(this)">🏃</button>
+              <button class="emoji-opt" data-em="🦁" onclick="App.setEmoji(this)">🦁</button>
+              <button class="emoji-opt" data-em="🦉" onclick="App.setEmoji(this)">🦉</button>
+              <button class="emoji-opt" data-em="⚡" onclick="App.setEmoji(this)">⚡</button>
+              <button class="emoji-opt" data-em="🏆" onclick="App.setEmoji(this)">🏆</button>
+            </div>
+          </div>
+
+          <!-- Lifetime Stats -->
+          <div class="profile-stats-card">
+            <h3 class="card-title">Lifetime Stats</h3>
+            <div class="stats-table">
+              <div class="stats-row-item"><span>Total Territory Captured</span><strong id="pTotalArea">0 m²</strong></div>
+              <div class="stats-row-item"><span>Total Distance Run</span><strong id="pTotalDist">0 km</strong></div>
+              <div class="stats-row-item"><span>Total Sessions</span><strong id="pSessions">0</strong></div>
+              <div class="stats-row-item"><span>Longest Streak</span><strong id="pStreak">0 Days 🔥</strong></div>
+              <div class="stats-row-item"><span>Health Score</span><strong id="pHealth">80/100 ❤️</strong></div>
+            </div>
+          </div>
+
+          <!-- Weekly Chart -->
+          <div class="profile-stats-card">
+            <h3 class="card-title">Weekly Activity</h3>
+            <div class="week-chart" id="weekChart">
+              <div class="week-col"><div class="week-bar" style="height:5%"></div><span>M</span></div>
+              <div class="week-col"><div class="week-bar" style="height:5%"></div><span>T</span></div>
+              <div class="week-col"><div class="week-bar active" style="height:5%"></div><span>W</span></div>
+              <div class="week-col"><div class="week-bar" style="height:5%"></div><span>T</span></div>
+              <div class="week-col"><div class="week-bar" style="height:5%"></div><span>F</span></div>
+              <div class="week-col"><div class="week-bar" style="height:5%"></div><span>S</span></div>
+              <div class="week-col"><div class="week-bar" style="height:5%"></div><span>S</span></div>
+            </div>
+          </div>
+
+          <!-- Google Maps API Key Setup -->
+          <div class="profile-stats-card">
+            <h3 class="card-title">🗺️ Google Maps Setup</h3>
+            <p class="gm-setup-note">Enter your Google Maps JavaScript API key to use Google Maps instead of OpenStreetMap.</p>
+            <div class="auth-input-wrap" style="margin:10px 0">
+              <i class="fa-brands fa-google auth-input-icon" style="color:#4285F4"></i>
+              <input type="text" id="gmApiKeyInput" placeholder="AIza..." style="color:var(--text)">
+            </div>
+            <div class="gm-btn-row">
+              <button class="profile-btn" onclick="MapEngine.applyGoogleMapsKey()" style="flex:2">
+                <i class="fa-solid fa-check"></i> Apply Key
+              </button>
+              <button class="profile-btn danger" onclick="MapEngine.clearGoogleMapsKey()" style="flex:1">
+                <i class="fa-solid fa-trash"></i> Clear
               </button>
             </div>
-
-            <!-- Weekly Chart Section matching Zarss rounded bars layout -->
-            <div class="zarss-chart-card">
-              <div class="zcc-header">
-                <div class="zcc-title-info">
-                  <h3>User in The Last Week</h3>
-                  <span class="zcc-stats">+ 3,2% captures</span>
-                </div>
-                <span class="zcc-subtitle-link">See statistics for all time</span>
-              </div>
-              
-              <!-- Responsive rounded bar graph container -->
-              <div class="zarss-bar-graph">
-                <div class="chart-col-track">
-                  <div class="chart-bar-container">
-                    <div class="chart-bar-fill" style="height: 40%"></div>
-                  </div>
-                  <span class="chart-day-label">Mon</span>
-                </div>
-                <div class="chart-col-track">
-                  <div class="chart-bar-container">
-                    <div class="chart-bar-fill" style="height: 65%"></div>
-                  </div>
-                  <span class="chart-day-label">Tue</span>
-                </div>
-                <div class="chart-col-track">
-                  <!-- Active day with tooltip indicator matching mockup -->
-                  <div class="chart-bar-container active-day">
-                    <div class="chart-tooltip-bubble">$33,567</div>
-                    <div class="chart-bar-fill" style="height: 82%"></div>
-                  </div>
-                  <span class="chart-day-label">Wed</span>
-                </div>
-                <div class="chart-col-track">
-                  <div class="chart-bar-container">
-                    <div class="chart-bar-fill" style="height: 30%"></div>
-                  </div>
-                  <span class="chart-day-label">Thu</span>
-                </div>
-                <div class="chart-col-track">
-                  <div class="chart-bar-container">
-                    <div class="chart-bar-fill" style="height: 55%"></div>
-                  </div>
-                  <span class="chart-day-label">Fri</span>
-                </div>
-                <div class="chart-col-track">
-                  <div class="chart-bar-container">
-                    <div class="chart-bar-fill" style="height: 75%"></div>
-                  </div>
-                  <span class="chart-day-label">Sat</span>
-                </div>
-                <div class="chart-col-track">
-                  <div class="chart-bar-container">
-                    <div class="chart-bar-fill" style="height: 10%" id="chart-today-bar"></div>
-                  </div>
-                  <span class="chart-day-label">Sun</span>
-                </div>
-              </div>
-            </div>
-
-            <!-- Dashboard Bottom Table Section: Last Orders style Activity Feed -->
-            <div class="zarss-table-card">
-              <div class="zst-header">
-                <h3>Last Actions & Logs</h3>
-                <div class="zcc-header-btns">
-                  <button class="btn btn-zst">Updates Every 3 Hours</button>
-                  <span class="zcc-subtitle-link">View All Logs</span>
-                </div>
-              </div>
-
-              <!-- List container -->
-              <div class="zarss-table-list" id="dashboard-table-list">
-                <!-- Populated dynamically by JS -->
-              </div>
-            </div>
-
-            <!-- Quests/Daily Missions Section -->
-            <div class="missions-section" style="margin-top: 24px;">
-              <div class="section-title-row">
-                <h3>Daily Quests</h3>
-                <span class="section-badge">3 Active</span>
-              </div>
-              <div class="mission-list" id="daily-mission-list">
-                <!-- Mission cards loaded by JS -->
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <!-- 2. MAP SCREEN (ACTIVITY TRACKER) -->
-        <section id="screen-map" class="app-screen">
-          <div class="map-layout">
-            
-            <!-- Map Canvas Leaflet container -->
-            <div id="map-container" class="leaflet-map-canvas"></div>
-
-            <!-- Floating Simulation Control Panel -->
-            <div class="map-controls-panel" id="map-controls">
-              
-              <!-- Real Geolocation vs Simulator Mode Toggle -->
-              <div class="gps-mode-bar">
-                <span class="gps-mode-label">Tracking Mode:</span>
-                <div class="gps-toggle-group">
-                  <button class="gps-pill active" id="gps-mode-sim" title="Simulate using keypad & keys">🎮 Simulator</button>
-                  <button class="gps-pill" id="gps-mode-device" title="Use your device's actual GPS location">📡 Real Device GPS</button>
-                </div>
-              </div>
-
-              <!-- Stats dashboard view -->
-              <div class="tracking-summary-row" id="tracking-stats-row">
-                <div class="track-stat">
-                  <span class="track-stat-num" id="track-distance">0.00 km</span>
-                  <span class="track-stat-label">Distance</span>
-                </div>
-                <div class="track-stat">
-                  <span class="track-stat-num" id="track-duration">00:00</span>
-                  <span class="track-stat-label">Duration</span>
-                </div>
-                <div class="track-stat">
-                  <span class="track-stat-num" id="track-live-area">0 m²</span>
-                  <span class="track-stat-label">Est. Loop Area</span>
-                </div>
-                <div class="track-stat">
-                  <span class="track-stat-num" id="track-speed">0.0 km/h</span>
-                  <span class="track-stat-label">Speed</span>
-                </div>
-              </div>
-
-              <!-- Simulator Helper Controls -->
-              <div class="simulator-instructions" id="sim-instructions-panel">
-                <p>Move your avatar using <b>Keyboard Arrow Keys</b> or the D-Pad buttons below.</p>
-              </div>
-
-              <!-- Directional D-Pad for simulating walking on device -->
-              <div class="simulator-keypad" id="sim-keypad-panel">
-                <div class="keypad-row">
-                  <button class="key-btn" id="key-up" title="Move Up"><i class="fa-solid fa-chevron-up"></i></button>
-                </div>
-                <div class="keypad-row">
-                  <button class="key-btn" id="key-left" title="Move Left"><i class="fa-solid fa-chevron-left"></i></button>
-                  <button class="key-btn font-bold active-key" id="key-center" title="Close Loop Manual Pin">
-                    <i class="fa-solid fa-map-pin"></i>
-                  </button>
-                  <button class="key-btn" id="key-right" title="Move Right"><i class="fa-solid fa-chevron-right"></i></button>
-                </div>
-                <div class="keypad-row">
-                  <button class="key-btn" id="key-down" title="Move Down"><i class="fa-solid fa-chevron-down"></i></button>
-                </div>
-              </div>
-
-              <!-- Sim Speed Controls -->
-              <div class="simulator-speed-control" id="sim-speed-panel">
-                <div class="speed-row">
-                  <span>Sim Speed:</span>
-                  <button class="speed-pill active" data-speed="walk">🚶 Walk (5 km/h)</button>
-                  <button class="speed-pill" data-speed="run">🏃 Run (15 km/h)</button>
-                </div>
-                <div class="anti-cheat-status alert-box hidden" id="cheat-alert">
-                  <i class="fa-solid fa-triangle-exclamation"></i> TOO FAST! Speed exceeds 30 km/h — capture suspended.
-                </div>
-              </div>
-
-              <!-- Primary Action Buttons -->
-              <div class="action-buttons-row">
-                <button class="btn btn-danger hidden" id="tracker-stop-btn">
-                  <i class="fa-solid fa-stop"></i> Stop & Save
-                </button>
-                <button class="btn btn-warning hidden" id="tracker-pause-btn">
-                  <i class="fa-solid fa-pause"></i> Pause
-                </button>
-                <button class="btn btn-primary" id="tracker-start-btn">
-                  <i class="fa-solid fa-play"></i> Start Capture
-                </button>
-              </div>
-            </div>
-
-            <!-- Mini Legend Overlay -->
-            <div class="map-legend">
-              <div class="legend-item"><span class="legend-color user-col"></span> You</div>
-              <div class="legend-item"><span class="legend-color ai1-col"></span> Alpha (AI)</div>
-              <div class="legend-item"><span class="legend-color ai2-col"></span> Beta (AI)</div>
-              <div class="legend-item"><span class="legend-color zone-col"></span> Park Zone</div>
-            </div>
-          </div>
-        </section>
-
-        <!-- 3. DECAY & TIME MACHINE SCREEN -->
-        <section id="screen-defense" class="app-screen">
-          <div class="scroll-container">
-            <div class="screen-title">
-              <h2>🛡️ Defense Center</h2>
-              <p>Monitor your territories and defend them from time decay simulation.</p>
-            </div>
-
-            <!-- Time Machine Simulator Card (For Judges Demo) -->
-            <div class="time-machine-card">
-              <div class="tm-header">
-                <span class="tm-title"><i class="fa-solid fa-hourglass-half"></i> Time Machine (Demo Controls)</span>
-                <span class="tm-badge">Skip Time</span>
-              </div>
-              <p class="tm-desc">Skip days into the future to show judges how territories gradually decay and fade over time.</p>
-              <div class="tm-buttons-row">
-                <button class="btn btn-outline tm-btn" id="tm-add-1d"><i class="fa-solid fa-caret-right"></i> +1 Day</button>
-                <button class="btn btn-outline tm-btn" id="tm-add-3d"><i class="fa-solid fa-forward"></i> +3 Days</button>
-                <button class="btn btn-outline tm-btn" id="tm-add-7d"><i class="fa-solid fa-forward-fast"></i> +7 Days</button>
-              </div>
-            </div>
-
-            <!-- Territory Health & Decay List Panel -->
-            <div class="decay-dashboard-section">
-              <div class="section-title-row">
-                <h3>Territory Health & Decay</h3>
-                <span class="section-badge" id="decay-count-badge">1 Active</span>
-              </div>
-              <div class="decay-list" id="decay-list-container">
-                <!-- Rendered Dynamically by JS -->
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <!-- 3b. DECAY WATCH SCREEN (standalone, navigable via sidebar) -->
-        <section id="screen-decay" class="app-screen">
-          <div class="scroll-container">
-            <div class="screen-title">
-              <h2>📉 Decay Watch</h2>
-              <p>Track territory health in real-time and simulate future decay.</p>
-            </div>
-
-            <!-- Summary Stats Row -->
-            <div class="decay-summary-row">
-              <div class="decay-stat-pill">
-                <i class="fa-solid fa-map"></i>
-                <span class="dsp-num" id="decay-total-count">0</span>
-                <span class="dsp-label">Territories</span>
-              </div>
-              <div class="decay-stat-pill healthy">
-                <i class="fa-solid fa-circle-check"></i>
-                <span class="dsp-num" id="decay-healthy-count">0</span>
-                <span class="dsp-label">Healthy</span>
-              </div>
-              <div class="decay-stat-pill warning">
-                <i class="fa-solid fa-triangle-exclamation"></i>
-                <span class="dsp-num" id="decay-fading-count">0</span>
-                <span class="dsp-label">Fading</span>
-              </div>
-              <div class="decay-stat-pill danger">
-                <i class="fa-solid fa-circle-xmark"></i>
-                <span class="dsp-num" id="decay-critical-count">0</span>
-                <span class="dsp-label">Critical</span>
-              </div>
-            </div>
-
-            <!-- Territory Health List -->
-            <div class="decay-dashboard-section" style="margin-top:16px;">
-              <div class="section-title-row">
-                <h3>Territory Health</h3>
-                <span class="section-badge" id="decay-count-badge-2">0 Active</span>
-              </div>
-              <div class="decay-list" id="decay-list-container-2">
-                <!-- Rendered dynamically by JS -->
-              </div>
-            </div>
-
-            <!-- Time Machine Card -->
-            <div class="time-machine-card" style="margin-top:16px;">
-              <div class="tm-header">
-                <span class="tm-title"><i class="fa-solid fa-hourglass-half"></i> Time Machine (Demo)</span>
-                <span class="tm-badge">Skip Time</span>
-              </div>
-              <p class="tm-desc">Fast-forward time to simulate how territories decay — great for demos.</p>
-              <div class="tm-buttons-row">
-                <button class="btn btn-outline tm-btn" id="tm2-add-1d"><i class="fa-solid fa-caret-right"></i> +1 Day</button>
-                <button class="btn btn-outline tm-btn" id="tm2-add-3d"><i class="fa-solid fa-forward"></i> +3 Days</button>
-                <button class="btn btn-outline tm-btn" id="tm2-add-7d"><i class="fa-solid fa-forward-fast"></i> +7 Days</button>
-              </div>
-            </div>
-
-          </div>
-        </section>
-
-        <!-- 4. CHALLENGES SCREEN -->
-        <section id="screen-challenges" class="app-screen">
-          <div class="scroll-container">
-            <div class="screen-title">
-              <h2>🎯 Challenges</h2>
-              <p>Complete workouts to earn XP, streak boosts, and unique badges.</p>
-            </div>
-
-            <!-- Challenge type switcher -->
-            <div class="tabs-sub" id="challenges-tabs">
-              <button class="tab-sub active" data-filter="daily">Daily Missions</button>
-              <button class="tab-sub" data-filter="weekly">Weekly Challenges</button>
-            </div>
-
-            <div class="challenges-view-container">
-              <div class="mission-list" id="challenges-list-full">
-                <!-- Full list populated by JS -->
-              </div>
-            </div>
-
-            <div class="rewards-section">
-              <h3>Earned Badges</h3>
-              <div class="badges-grid" id="badges-grid-container">
-                <!-- Loaded by JS -->
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <!-- 5. LEADERBOARD SCREEN -->
-        <section id="screen-leaderboard" class="app-screen">
-          <div class="scroll-container">
-            <div class="screen-title">
-              <h2>🏆 Leaderboard</h2>
-              <p>Compete with active runners in your area.</p>
-            </div>
-
-          <!-- Leaderboard categories -->
-          <div class="tabs-sub" id="leaderboard-tabs">
-            <button class="tab-sub active" id="leaderboard-tab-local">Local Area</button>
-            <button class="tab-sub" id="leaderboard-tab-college">College Campus</button>
+            <p class="gm-status" id="gmStatus"></p>
+            <a class="gm-help-link" href="https://console.cloud.google.com/" target="_blank">
+              <i class="fa-solid fa-arrow-up-right-from-square"></i> Get API Key from Google Cloud Console
+            </a>
           </div>
 
-            <div class="leaderboard-header-rank">
-              <!-- Podium container -->
-              <div class="podium-container">
-                <div class="podium-step step-2">
-                  <div class="podium-avatar">🏃‍♀️</div>
-                  <div class="podium-name">AlphaRunner</div>
-                  <div class="podium-stat">12.5k XP</div>
-                  <div class="step-num">2</div>
-                </div>
-                <div class="podium-step step-1">
-                  <div class="crown-icon">👑</div>
-                  <div class="podium-avatar">👑🏃‍♂️</div>
-                  <div class="podium-name">TerritoryKing</div>
-                  <div class="podium-stat">14.8k XP</div>
-                  <div class="step-num">1</div>
-                </div>
-                <div class="podium-step step-3">
-                  <div class="podium-avatar">🚴‍♂️</div>
-                  <div class="podium-name">BetaRunner</div>
-                  <div class="podium-stat">9.2k XP</div>
-                  <div class="step-num">3</div>
-                </div>
-              </div>
-            </div>
-
-            <div class="leaderboard-list" id="leaderboard-items">
-              <!-- Leaderboard items populated by JS -->
-            </div>
+          <!-- Actions -->
+          <div class="profile-actions">
+            <button class="profile-btn" onclick="App.spawnRivals()"><i class="fa-solid fa-shuffle"></i> Spawn Rivals</button>
+            <button class="profile-btn danger" onclick="Auth.logout()"><i class="fa-solid fa-right-from-bracket"></i> Sign Out</button>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <!-- 6. AI COACH SCREEN -->
-        <section id="screen-coach" class="app-screen">
-          <div class="coach-layout">
-            
-            <div class="coach-banner">
-              <div class="coach-avatar">🤖</div>
-              <div class="coach-title-info">
-                <h3>Terry - AI Coach</h3>
-                <span class="coach-status"><span class="status-dot"></span> Online</span>
-              </div>
-            </div>
+    </div><!-- /.screens -->
 
-            <!-- Chat history -->
-            <div class="chat-viewport" id="chat-messages">
-              <!-- Simulated greeting messages -->
-              <div class="chat-bubble coach">
-                <div class="bubble-content">
-                  Hello there, Runner! I am <b>Terry</b>, your personal AI fitness coach. I analyze your activity consistency, territory sizes, and recovery levels.
-                </div>
-                <span class="bubble-time">18:00</span>
-              </div>
-              <div class="chat-bubble coach">
-                <div class="bubble-content">
-                  Based on your logs, you have been highly active in the park. You completed <b>3.5 km</b> today and improved your area coverage by <b>12%</b> compared to last week. Ready for a recommendation?
-                </div>
-                <span class="bubble-time">18:01</span>
-              </div>
-            </div>
+    <!-- BOTTOM NAV -->
+    <nav class="bottom-nav">
+      <button class="nav-tab active" data-screen="home" onclick="App.navigate('home')">
+        <i class="fa-solid fa-house"></i><span>Home</span>
+      </button>
+      <button class="nav-tab" data-screen="map" onclick="App.navigate('map')">
+        <i class="fa-solid fa-map-location-dot"></i><span>Map</span>
+      </button>
+      <button class="nav-tab" data-screen="defense" onclick="App.navigate('defense')">
+        <i class="fa-solid fa-shield-halved"></i><span>Defense</span>
+      </button>
+      <button class="nav-tab" data-screen="challenges" onclick="App.navigate('challenges')">
+        <i class="fa-solid fa-bullseye"></i><span>Quests</span>
+      </button>
+      <button class="nav-tab" data-screen="leaderboard" onclick="App.navigate('leaderboard')">
+        <i class="fa-solid fa-trophy"></i><span>Rank</span>
+      </button>
+      <button class="nav-tab" data-screen="coach" onclick="App.navigate('coach')">
+        <i class="fa-solid fa-robot"></i><span>Coach</span>
+      </button>
+      <button class="nav-tab" data-screen="profile" onclick="App.navigate('profile')">
+        <i class="fa-solid fa-user"></i><span>Profile</span>
+      </button>
+    </nav>
 
-            <!-- Suggested Quick Prompts -->
-            <div class="quick-prompt-bar" id="quick-prompts-container">
-              <button class="prompt-chip" data-prompt="Analyze my workout consistency">📊 Analyze performance</button>
-              <button class="prompt-chip" data-prompt="Suggest a target for tomorrow">🎯 Goal suggestions</button>
-              <button class="prompt-chip" data-prompt="Am I overtraining? Check fatigue">🛡️ Check fatigue level</button>
-              <button class="prompt-chip" data-prompt="How do I get territory protection?">🔥 Streak protection</button>
-            </div>
+    <!-- TOAST -->
+    <div class="toast" id="toast"></div>
 
-            <!-- Chat input form -->
-            <form class="chat-input-row" id="coach-chat-form">
-              <input type="text" id="coach-message-input" placeholder="Ask Terry about your training..." required autocomplete="off">
-              <button type="submit" class="chat-send-btn" title="Send message"><i class="fa-solid fa-paper-plane"></i></button>
-            </form>
-          </div>
-        </section>
-
-        <!-- 7. PROFILE SCREEN -->
-        <section id="screen-profile" class="app-screen">
-          <div class="scroll-container">
-            
-            <!-- Customizable profile card -->
-            <div class="profile-card">
-              <div class="profile-avatar-large" id="profile-avatar-emoji">🏃‍♂️</div>
-              
-              <!-- Picture Upload Button -->
-              <div class="profile-photo-edit-btn">
-                <label for="profile-photo-upload-input" class="photo-edit-label" title="Upload custom photo">
-                  <i class="fa-solid fa-camera"></i> Change Photo
-                </label>
-                <input type="file" id="profile-photo-upload-input" accept="image/*" style="display: none;">
-              </div>
-
-              <!-- Direct Name Editor -->
-              <div class="profile-username-edit-row">
-                <input type="text" id="profile-username-textbox" value="Smarty" placeholder="Edit Username" maxlength="16">
-                <button class="name-save-indicator" title="Saved"><i class="fa-solid fa-floppy-disk"></i></button>
-              </div>
-
-              <div class="profile-level-badge" id="profile-level-badge">Level 12 Explorer</div>
-              
-              <div class="avatar-picker-row" id="profile-emoji-selectors">
-                <span>Select Emoji:</span>
-                <button class="avatar-opt active" data-emoji="🏃‍♂️">🏃‍♂️</button>
-                <button class="avatar-opt" data-emoji="🏃‍♀️">🏃‍♀️</button>
-                <button class="avatar-opt" data-emoji="🦁">🦁</button>
-                <button class="avatar-opt" data-emoji="🦉">🦉</button>
-                <button class="avatar-opt" data-emoji="⚡">⚡</button>
-              </div>
-            </div>
-
-            <!-- Level stats progress bar -->
-            <div class="profile-stats-card">
-              <h3>Lifetime Achievements</h3>
-              <div class="profile-bar-row">
-                <span class="profile-bar-label">Total Captured Area</span>
-                <span class="profile-bar-value" id="profile-total-captured">125,400 m²</span>
-              </div>
-              <div class="profile-bar-row">
-                <span class="profile-bar-label">Weekly Consistency</span>
-                <span class="profile-bar-value">94%</span>
-              </div>
-              <div class="profile-bar-row">
-                <span class="profile-bar-label">Longest Streak</span>
-                <span class="profile-bar-value" id="profile-max-streak">18 Days</span>
-              </div>
-            </div>
-
-            <!-- Weekly activity history chart -->
-            <div class="profile-stats-card">
-              <h3>Weekly Capture Consistency</h3>
-              <div class="weekly-bar-chart">
-                <div class="chart-col">
-                  <div class="chart-bar" style="height: 40%"></div>
-                  <span class="chart-day">M</span>
-                </div>
-                <div class="chart-col">
-                  <div class="chart-bar" style="height: 60%"></div>
-                  <span class="chart-day">T</span>
-                </div>
-                <div class="chart-col">
-                  <div class="chart-bar" style="height: 85%"></div>
-                  <span class="chart-day">W</span>
-                </div>
-                <div class="chart-col">
-                  <div class="chart-bar" style="height: 30%"></div>
-                  <span class="chart-day">T</span>
-                </div>
-                <div class="chart-col">
-                  <div class="chart-bar" style="height: 70%"></div>
-                  <span class="chart-day">F</span>
-                </div>
-                <div class="chart-col">
-                  <div class="chart-bar active" style="height: 95%"></div>
-                  <span class="chart-day">S</span>
-                </div>
-                <div class="chart-col">
-                  <div class="chart-bar" style="height: 0%" id="chart-today-bar"></div>
-                  <span class="chart-day">S</span>
-                </div>
-              </div>
-            </div>
-
-            <div class="profile-stats-card">
-              <h3>Actions & Settings</h3>
-              <div class="settings-actions">
-                <button class="btn btn-outline" id="btn-logout">
-                  <i class="fa-solid fa-right-from-bracket"></i> Logout / Switch User
-                </button>
-                <button class="btn btn-outline" id="btn-reset-data">
-                  <i class="fa-solid fa-trash-can"></i> Reset App Data
-                </button>
-                <button class="btn btn-outline" id="btn-randomize-territories">
-                  <i class="fa-solid fa-shuffle"></i> Spawn Competitor Territories
-                </button>
-              </div>
-            </div>
-
-          </div>
-        </section>
-      </main>
-
-      <!-- ================= BOTTOM TAB BAR (Visible on Mobile only) ================= -->
-      <nav class="app-nav-bar">
-        <button class="nav-tab active" data-screen="home">
-          <i class="fa-solid fa-house"></i>
-          <span>Home</span>
-        </button>
-        <button class="nav-tab" data-screen="map">
-          <i class="fa-solid fa-map-location-dot"></i>
-          <span>Territory</span>
-        </button>
-        <button class="nav-tab" data-screen="defense">
-          <i class="fa-solid fa-shield-halved"></i>
-          <span>Defense</span>
-        </button>
-        <button class="nav-tab" data-screen="challenges">
-          <i class="fa-solid fa-bullseye"></i>
-          <span>Quests</span>
-        </button>
-        <button class="nav-tab" data-screen="leaderboard">
-          <i class="fa-solid fa-trophy"></i>
-          <span>Rank</span>
-        </button>
-        <button class="nav-tab" data-screen="coach">
-          <i class="fa-solid fa-robot"></i>
-          <span>Coach</span>
-        </button>
-        <button class="nav-tab" data-screen="profile">
-          <i class="fa-solid fa-user"></i>
-          <span>Profile</span>
-        </button>
-      </nav>
+    <!-- LEVEL UP MODAL -->
+    <div class="modal-overlay hidden" id="levelModal">
+      <div class="modal-card">
+        <div class="modal-trophy">🏆</div>
+        <h2 class="modal-title">LEVEL UP!</h2>
+        <p class="modal-sub">You are now</p>
+        <div class="modal-badge" id="modalBadge">Level 2</div>
+        <button class="modal-close-btn" onclick="App.closeModal('levelModal')">Awesome! 🎉</button>
+      </div>
     </div>
-  </div>
 
-  <!-- Leaflet Map JS -->
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-  <!-- Application Core Script -->
-  <script src="app.js?v=2.0"></script>
+    <!-- CAPTURE SUCCESS MODAL -->
+    <div class="modal-overlay hidden" id="captureModal">
+      <div class="modal-card">
+        <div class="modal-trophy">🗺️</div>
+        <h2 class="modal-title">Territory Captured!</h2>
+        <p class="modal-sub" id="captureDetails">You captured new territory!</p>
+        <div class="modal-badge green" id="captureXP">+50 XP</div>
+        <button class="modal-close-btn" onclick="App.closeModal('captureModal')">Claim Reward 🎯</button>
+      </div>
+    </div>
+
+  </div><!-- /#app -->
+</div><!-- /.phone-shell -->
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="app.js"></script>
 </body>
 </html>

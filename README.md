@@ -19,6 +19,13 @@ This repository contains a Flutter app wrapper for the existing `My Territory` w
 - Local auth flow with phone/OTP and password login stubbed for prototype use
 - Dashboard, profile, and map screens built for mobile navigation
 - Placeholder architecture ready for backend REST API integration
+- Essential mobile packages added for future expansion:
+  - `google_maps_flutter`
+  - `geolocator`
+  - `firebase_core`
+  - `firebase_auth`
+  - `cloud_firestore`
+  - `firebase_messaging`
 
 ## How to run
 
@@ -29,6 +36,34 @@ This repository contains a Flutter app wrapper for the existing `My Territory` w
 ```bash
 flutter pub get
 flutter run
+```
+
+## Build Android APK
+
+When the app is ready:
+
+```bash
+flutter build apk
+```
+
+Output:
+
+```bash
+build/app/outputs/flutter-apk/app-release.apk
+```
+
+## Build Play Store Package
+
+Google now prefers AAB files. Generate:
+
+```bash
+flutter build appbundle
+```
+
+Output:
+
+```bash
+build/app/outputs/bundle/release/app-release.aab
 ```
 
 ## Notes

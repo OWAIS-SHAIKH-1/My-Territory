@@ -3,6 +3,7 @@ class UserProfile {
   final String email;
   final String phone;
   final String avatar;
+  final String avatarImage;
   final int level;
   final int xp;
   final int streak;
@@ -13,6 +14,7 @@ class UserProfile {
     required this.email,
     required this.phone,
     required this.avatar,
+    required this.avatarImage,
     required this.level,
     required this.xp,
     required this.streak,
@@ -25,6 +27,7 @@ class UserProfile {
       email: map['email'] as String? ?? '',
       phone: map['phone'] as String? ?? '',
       avatar: map['avatar'] as String? ?? '🏃‍♂️',
+      avatarImage: map['avatarImage'] as String? ?? '',
       level: map['level'] as int? ?? 1,
       xp: map['xp'] as int? ?? 0,
       streak: map['streak'] as int? ?? 0,
@@ -38,6 +41,7 @@ class UserProfile {
       'email': email,
       'phone': phone,
       'avatar': avatar,
+      'avatarImage': avatarImage,
       'level': level,
       'xp': xp,
       'streak': streak,

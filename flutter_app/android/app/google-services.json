@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "349688809723",
+    "project_id": "my-territory-5dca5",
+    "storage_bucket": "my-territory-5dca5.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:349688809723:android:d3fe2f43f672d1ec09485e",
+        "android_client_info": {
+          "package_name": "com.owais.myterritory"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB1pkNwXdSGp3iUx4jj8tXj2Gr0jKbLuoI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
