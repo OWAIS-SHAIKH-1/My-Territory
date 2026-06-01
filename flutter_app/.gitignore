@@ -1,0 +1,37 @@
+# Flutter/Pub
+build/
+.dart_tool/
+.packages
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache
+.pub
+
+# IntelliJ
+*.iml
+.idea/
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store
+
+# Android
+**/gradle-wrapper.jar
+android/.gradle/
+android/app/debug.keystore
+
+# iOS
+**/Flutter/Flutter.framework
+**/Flutter/Flutter.podspec
+**/Pods/
+**/Podfile.lock
+**/Runner/GeneratedPluginRegistrant.*
+
+# Generated Xcode files
+*.xcworkspace
+*.xcuserdata
+*.mode1v3
+*.pbxuser
+*.perspectivev3
