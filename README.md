@@ -36,6 +36,8 @@ flutter run
 ## Notes
 
 - This is a base conversion. The website HTML/CSS/JS is embedded as Flutter assets.
+- Android and iOS launcher icon asset sets have been added under `flutter_app/android/app/src/main/res` and `flutter_app/ios/Runner/Assets.xcassets/AppIcon.appiconset`.
+- Minimal Android and iOS platform config files have also been added for mobile publishing.
 - For a native Flutter implementation, the UI can be rebuilt using Flutter widgets in `lib/main.dart`.
 - OTP/password authentication remains in the web prototype and will continue to work inside the WebView.
 
